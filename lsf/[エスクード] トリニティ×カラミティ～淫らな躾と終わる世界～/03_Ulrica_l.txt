@@ -1,0 +1,91 @@
+	分組	圖檔
+全身		
+dress	1	03_Ulrica_l_002
+dress	1	03_Ulrica_l_003
+
+鎖全身		
+dress	2	03_Ulrica_l_002
+dress	2	03_Ulrica_l_003
+dress	2	03_Ulrica_l_005
+dress	2	03_Ulrica_l_007
+dress	2	03_Ulrica_l_012
+
+武全身		
+dress	3	03_Ulrica_l_002
+dress	3	03_Ulrica_l_003
+dress	3	03_Ulrica_l_004
+dress	3	03_Ulrica_l_009
+
+鎖武全身		
+dress	4	03_Ulrica_l_002
+dress	4	03_Ulrica_l_003
+dress	4	03_Ulrica_l_004
+dress	4	03_Ulrica_l_005
+dress	4	03_Ulrica_l_006
+dress	4	03_Ulrica_l_009
+dress	4	03_Ulrica_l_011
+
+抖全身		
+dress	5	03_Ulrica_l_001
+dress	5	03_Ulrica_l_002
+dress	5	03_Ulrica_l_003
+dress	5	03_Ulrica_l_008
+鎖抖全身		
+dress	6	03_Ulrica_l_001
+dress	6	03_Ulrica_l_002
+dress	6	03_Ulrica_l_003
+dress	6	03_Ulrica_l_005
+dress	6	03_Ulrica_l_007
+dress	6	03_Ulrica_l_008
+dress	6	03_Ulrica_l_010
+dress	6	03_Ulrica_l_012
+武抖全身		
+dress	7	03_Ulrica_l_001
+dress	7	03_Ulrica_l_002
+dress	7	03_Ulrica_l_003
+dress	7	03_Ulrica_l_004
+dress	7	03_Ulrica_l_008
+dress	7	03_Ulrica_l_009
+鎖武抖全身		
+dress	8	03_Ulrica_l_001
+dress	8	03_Ulrica_l_002
+dress	8	03_Ulrica_l_003
+dress	8	03_Ulrica_l_004
+dress	8	03_Ulrica_l_005
+dress	8	03_Ulrica_l_006
+dress	8	03_Ulrica_l_008
+dress	8	03_Ulrica_l_009
+dress	8	03_Ulrica_l_010
+dress	8	03_Ulrica_l_011
+
+		
+表情		
+face	1	03_Ulrica_l_015
+face	2	03_Ulrica_l_016
+face	3	03_Ulrica_l_017
+face	4	03_Ulrica_l_018
+face	5	03_Ulrica_l_019
+face	6	03_Ulrica_l_020
+face	7	03_Ulrica_l_021
+face	8	03_Ulrica_l_022
+face	9	03_Ulrica_l_023
+face	10	03_Ulrica_l_024
+face	11	03_Ulrica_l_025
+face	12	03_Ulrica_l_026
+face	13	03_Ulrica_l_027
+face	14	03_Ulrica_l_028
+face	15	03_Ulrica_l_029
+face	16	03_Ulrica_l_030
+face	17	03_Ulrica_l_031
+face	18	03_Ulrica_l_032
+face	19	03_Ulrica_l_033
+face	20	03_Ulrica_l_034
+face	21	03_Ulrica_l_035
+face	22	03_Ulrica_l_036
+face	23	03_Ulrica_l_037
+
+
+
+
+表情紅
+dupface	a	03_Ulrica_l_014

@@ -1,0 +1,17 @@
+	分組	圖檔
+
+抖鎖杖		
+dress	8	02_Sophie_l_001
+dress	8	02_Sophie_l_003
+
+
+dupdress	a	123
+
+表情		
+face	1	02_Sophie_l_010
+face	2	02_Sophie_l_011
+face	3	02_Sophie_l_012
+
+
+表情紅
+dupface	a	02_Sophie_l_009

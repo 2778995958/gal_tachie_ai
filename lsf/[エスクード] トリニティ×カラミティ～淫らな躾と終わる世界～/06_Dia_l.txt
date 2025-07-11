@@ -1,0 +1,39 @@
+	分組	圖檔
+全身		
+dress	1	06_Dia_l_001
+dress	1	06_Dia_l_002
+dress	1	06_Dia_l_003
+dress	1	06_Dia_l_005
+dress	1	06_Dia_l_006
+		
+劍全身		
+dress	2	06_Dia_l_001
+dress	2	06_Dia_l_002
+dress	2	06_Dia_l_004
+dress	2	06_Dia_l_005
+dress	2	06_Dia_l_007
+
+表情		
+face	1	06_Dia_l_010
+face	2	06_Dia_l_011
+face	3	06_Dia_l_012
+face	4	06_Dia_l_013
+face	5	06_Dia_l_014
+face	6	06_Dia_l_015
+face	7	06_Dia_l_016
+face	8	06_Dia_l_017
+face	9	06_Dia_l_018
+face	10	06_Dia_l_019
+face	11	06_Dia_l_020
+face	12	06_Dia_l_021
+face	13	06_Dia_l_022
+face	14	06_Dia_l_023
+face	15	06_Dia_l_024
+face	16	06_Dia_l_025
+face	17	06_Dia_l_026
+face	18	06_Dia_l_027
+face	19	06_Dia_l_028
+
+
+表情紅
+dupface	a	06_Dia_l_009

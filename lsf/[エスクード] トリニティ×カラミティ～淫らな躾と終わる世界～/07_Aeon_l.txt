@@ -1,0 +1,37 @@
+	分組	圖檔
+全身		
+dress	1	07_Aeon_l_001
+dress	1	07_Aeon_l_002
+dress	1	07_Aeon_l_026
+		
+全身		
+dress	2	07_Aeon_l_001
+dress	2	07_Aeon_l_002
+dress	2	07_Aeon_l_027
+
+
+表情		
+face	1	07_Aeon_l_005
+face	2	07_Aeon_l_006
+face	3	07_Aeon_l_007
+face	4	07_Aeon_l_008
+face	5	07_Aeon_l_009
+face	6	07_Aeon_l_010
+face	7	07_Aeon_l_011
+face	8	07_Aeon_l_012
+face	9	07_Aeon_l_013
+face	10	07_Aeon_l_014
+face	11	07_Aeon_l_015
+face	12	07_Aeon_l_016
+face	13	07_Aeon_l_017
+face	14	07_Aeon_l_018
+face	15	07_Aeon_l_019
+face	16	07_Aeon_l_020
+face	17	07_Aeon_l_021
+face	18	07_Aeon_l_022
+face	19	07_Aeon_l_023
+face	20	07_Aeon_l_024
+
+
+表情紅
+dupface	a	07_Aeon_l_004

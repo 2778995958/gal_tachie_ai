@@ -1,0 +1,27 @@
+	分組	圖檔
+全身		
+dress	1	08_Sonus_l_001
+dress	1	08_Sonus_l_002
+dress	1	08_Sonus_l_003
+		
+
+
+表情		
+face	1	08_Sonus_l_006
+face	2	08_Sonus_l_007
+face	3	08_Sonus_l_008
+face	4	08_Sonus_l_009
+face	5	08_Sonus_l_010
+face	6	08_Sonus_l_011
+face	7	08_Sonus_l_012
+face	8	08_Sonus_l_013
+face	9	08_Sonus_l_014
+face	10	08_Sonus_l_015
+face	11	08_Sonus_l_016
+face	12	08_Sonus_l_017
+face	13	08_Sonus_l_018
+face	14	08_Sonus_l_019
+face	15	08_Sonus_l_020
+
+表情紅
+dupface	a	08_Sonus_l_005
