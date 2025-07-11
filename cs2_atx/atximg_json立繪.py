@@ -270,8 +270,10 @@ def process_character_from_cl(cl_path):
                                     final_canvas_np = composite_numpy(final_canvas_np, p_img, (pos[0] + group_offset[0], pos[1] + group_offset[1]))
                             else: print(f"          > 警告: 在當前作用域中找不到 {filename_to_find}")
                         
-                        # 【★★★★★ 修改處 ★★★★★】恢復使用 fuku_counter 來確保檔名唯一性
-                        output_filename = f"{character_name}_{folder_prefix}_fuku{fuku_counter}_face{face_counter}.png"
+                        # 【★★★★★ 最終檔名格式 ★★★★★】
+                        # 組合描述性名稱 (ca21a) 和 唯一性流水號 (fuku1)
+                        descriptive_part = f"{folder_prefix}{base_cloth_code}"
+                        output_filename = f"{character_name}_{descriptive_part}_fuku{fuku_counter}_face{face_counter}.png"
                         
                         output_path = os.path.join(output_dir, output_filename)
                         if os.path.exists(output_path):
