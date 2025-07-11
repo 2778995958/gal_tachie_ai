@@ -8,6 +8,7 @@ from collections import defaultdict
 # --- 基礎設定 ---
 OFFSET_FILE_NAME = "offset.json"
 CHARLIST_FILE_NAME = "charlist.cl"
+# 【使用建議】如果你有不希望程式搜尋的資料夾，請把它們的名字加到這個列表中
 EXCLUDE_DIRS = ['output', 'atx', '新增資料夾', '新增資料夾 (2)']
 
 # --- 核心工具函式 (無變動) ---
@@ -107,29 +108,39 @@ def process_character_from_cl(cl_path):
     cl_data = parse_charlist(cl_path)
     if cl_data is None: return
 
+    # 【★★★★★ 最終修正 ★★★★★】修正索引建立的邏輯
     print("\n--- 步驟 1: 根據 charlist.cl 預先建立資料夾索引 ---")
     directory_cache = {}
-    all_pose1_prefixes = {}
+    
+    # 使用新的資料結構來處理多個pose1指向同一個pose2的情況
+    pose_map = defaultdict(set)
     for key, lines in cl_data.items():
         if key.startswith("pose1@"):
             for line in lines:
                 parts = line.split()
                 if len(parts) < 2: continue
-                all_pose1_prefixes[parts[1]] = parts[0]
+                # key是pose2標籤, value是所有指向它的pose1前綴集合
+                pose_map[parts[1]].add(parts[0])
+
     unique_folder_lookups = set()
-    for pose2_label, folder_prefix in all_pose1_prefixes.items():
+    for pose2_label, folder_prefixes in pose_map.items():
         for p2_line in cl_data.get(pose2_label, []):
             try:
                 part_code = p2_line.split(',')[1].strip()
                 if part_code and part_code != '@':
-                    unique_folder_lookups.add((folder_prefix, part_code))
+                    # 為每一個指向此處的pose1前綴，都建立一個搜尋任務
+                    for prefix in folder_prefixes:
+                        unique_folder_lookups.add((prefix, part_code))
             except IndexError: continue
+            
     print(f" > 找到 {len(unique_folder_lookups)} 個獨一無二的資料夾搜尋組合，開始建立索引...")
-    for folder_prefix, part_code in unique_folder_lookups:
+    for folder_prefix, part_code in sorted(list(unique_folder_lookups)): #排序讓日誌更整齊
         cache_key = (folder_prefix, part_code)
         folder_path = find_part_folder(char_dir, folder_prefix, part_code)
         directory_cache[cache_key] = folder_path
-        if not folder_path:
+        if folder_path:
+            print(f"   > 索引: ({folder_prefix}, {part_code}) -> {os.path.relpath(folder_path, char_dir)}")
+        else:
             print(f"   > 索引警告: 找不到 ({folder_prefix}, {part_code}) 的對應資料夾")
     print(" > 資料夾索引建立完畢。")
 
@@ -270,11 +281,8 @@ def process_character_from_cl(cl_path):
                                     final_canvas_np = composite_numpy(final_canvas_np, p_img, (pos[0] + group_offset[0], pos[1] + group_offset[1]))
                             else: print(f"          > 警告: 在當前作用域中找不到 {filename_to_find}")
                         
-                        # 【★★★★★ 最終檔名格式 ★★★★★】
-                        # 組合描述性名稱 (ca21a) 和 唯一性流水號 (fuku1)
                         descriptive_part = f"{folder_prefix}{base_cloth_code}"
                         output_filename = f"{character_name}_{descriptive_part}_fuku{fuku_counter}_face{face_counter}.png"
-                        
                         output_path = os.path.join(output_dir, output_filename)
                         if os.path.exists(output_path):
                             print(f"        > 檔案已存在，跳過: {output_filename}")
