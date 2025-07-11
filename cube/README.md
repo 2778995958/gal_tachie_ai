@@ -1,0 +1,2 @@
+cube社之類krkr的但大多數有csv坐標
+遇到過沒csv的情況所以2個py
