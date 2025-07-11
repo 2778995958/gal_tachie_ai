@@ -271,10 +271,11 @@ def process_character_from_cl(cl_path):
                                     final_canvas_np = composite_numpy(final_canvas_np, p_img, (pos[0] + group_offset[0], pos[1] + group_offset[1]))
                             else: print(f"          > 警告: 在當前作用域中找不到 {filename_to_find}")
                         
-                        output_filename = f"{character_name}_{folder_prefix}_fuku{fuku_counter}_face{face_counter}.png"
-                        output_path = os.path.join(output_dir, output_filename)
+                        # 【★★★★★ 修改處 ★★★★★】產生新的檔名格式
+                        filename_main_part = f"{folder_prefix}{base_cloth_code}"
+                        output_filename = f"{character_name}_{filename_main_part}_face{face_counter}.png"
                         
-                        # 【★★★★★ 修改處 ★★★★★】在儲存前檢查檔案是否存在
+                        output_path = os.path.join(output_dir, output_filename)
                         if os.path.exists(output_path):
                             print(f"        > 檔案已存在，跳過: {output_filename}")
                             continue
