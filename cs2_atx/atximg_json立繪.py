@@ -8,7 +8,6 @@ from collections import defaultdict
 # --- 基礎設定 ---
 OFFSET_FILE_NAME = "offset.json"
 CHARLIST_FILE_NAME = "charlist.cl"
-# 【使用建議】如果你有不希望程式搜尋的資料夾，請把它們的名字加到這個列表中
 EXCLUDE_DIRS = ['output', 'atx', '新增資料夾', '新增資料夾 (2)']
 
 # --- 核心工具函式 (無變動) ---
@@ -271,9 +270,8 @@ def process_character_from_cl(cl_path):
                                     final_canvas_np = composite_numpy(final_canvas_np, p_img, (pos[0] + group_offset[0], pos[1] + group_offset[1]))
                             else: print(f"          > 警告: 在當前作用域中找不到 {filename_to_find}")
                         
-                        # 【★★★★★ 修改處 ★★★★★】產生新的檔名格式
-                        filename_main_part = f"{folder_prefix}{base_cloth_code}"
-                        output_filename = f"{character_name}_{filename_main_part}_face{face_counter}.png"
+                        # 【★★★★★ 修改處 ★★★★★】恢復使用 fuku_counter 來確保檔名唯一性
+                        output_filename = f"{character_name}_{folder_prefix}_fuku{fuku_counter}_face{face_counter}.png"
                         
                         output_path = os.path.join(output_dir, output_filename)
                         if os.path.exists(output_path):
