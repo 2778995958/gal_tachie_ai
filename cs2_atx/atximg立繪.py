@@ -11,7 +11,7 @@ KUCHI_DIR_NAME = "kuchi"
 HOHO_DIR_NAME = "hoho"
 EFFECT_DIR_NAME = "effect"
 OFFSET_FILE_NAME = "offset.json"
-ATLAS_FILE_NAME = "atlas.json" 
+# ATLAS_FILE_NAME 已被移除
 
 # --- 核心函式 (維持不變) ---
 def ensure_dir(dir_path):
@@ -74,6 +74,7 @@ def process_character_directory(char_dir):
     offset_json_data = load_json_file(os.path.join(char_dir, OFFSET_FILE_NAME))
     if offset_json_data is None: return
     offset_data = {item['Key']: tuple(item['Value']) for item in offset_json_data}
+
     part_paths = { name: os.path.join(char_dir, name) for name in [FUKU_DIR_NAME, HOHO_DIR_NAME, KAO_DIR_NAME, KAMI_DIR_NAME, KUCHI_DIR_NAME, EFFECT_DIR_NAME] }
     
     fuku_files = get_all_png_files(part_paths[FUKU_DIR_NAME]); kao_files = get_png_files_from_dir(part_paths[KAO_DIR_NAME])
@@ -148,20 +149,16 @@ def process_character_directory(char_dir):
                         with Image.open(kuchi_path) as p_img: final_np = composite_numpy(base_np.copy(), p_img.convert("RGBA"), new_pos)
                         final_img = Image.fromarray(final_np); final_name = "_".join(final_name_parts) + ".png"
                         output_path = os.path.join(fuku_face_dir, final_name)
-                        # ★★★★★【修改處：加入檔案存在檢查】★★★★★
-                        if not os.path.exists(output_path):
-                            final_img.save(output_path)
+                        if not os.path.exists(output_path): final_img.save(output_path)
                         face_images[final_name] = final_img
                 else:
                     final_img = Image.fromarray(base_np); final_name = "_".join(name_parts) + ".png"
                     output_path = os.path.join(fuku_face_dir, final_name)
-                    if not os.path.exists(output_path):
-                        final_img.save(output_path)
+                    if not os.path.exists(output_path): final_img.save(output_path)
                     face_images[final_name] = final_img
         print(f" > 已處理 {len(face_images)} 張標準臉。")
         
         if effect_files:
-            print(f"--- [{fuku_base_name}] 流程 A.2: 疊加特效 (fuku_face_effect) ---")
             fuku_face_effect_dir = os.path.join(output_root, "fuku_face_effect"); ensure_dir(fuku_face_effect_dir)
             for face_name, face_img in face_images.items():
                 for effect_path in effect_files:
@@ -169,11 +166,9 @@ def process_character_directory(char_dir):
                     with Image.open(effect_path) as p_img: final_np = composite_numpy(np.array(face_img), p_img.convert("RGBA"), new_pos)
                     final_name = f"{os.path.splitext(face_name)[0]}_{get_short_name(effect_path)}.png"
                     output_path = os.path.join(fuku_face_effect_dir, final_name)
-                    if not os.path.exists(output_path):
-                        Image.fromarray(final_np).save(output_path)
-
+                    if not os.path.exists(output_path): Image.fromarray(final_np).save(output_path)
+        
         if hoho_files:
-            print(f"\n--- [{fuku_base_name}] 流程 B: 建立臉紅妝 (fuku_face_hoho) ---")
             fuku_face_hoho_dir = os.path.join(output_root, "fuku_face_hoho"); ensure_dir(fuku_face_hoho_dir)
             hoho_face_images = {}
             for body_name, body_img in body_bases.items():
@@ -189,20 +184,16 @@ def process_character_directory(char_dir):
                                  pos = get_image_position(kuchi_path, offset_data); new_pos = (pos[0]+global_offset[0], pos[1]+global_offset[1])
                                  with Image.open(kuchi_path) as p_img: final_np = composite_numpy(kao_np.copy(), p_img.convert("RGBA"), new_pos)
                                  final_name = "_".join(name_parts + [get_short_name(kuchi_path)]) + ".png"
-                                 final_img = Image.fromarray(final_np)
-                                 output_path = os.path.join(fuku_face_hoho_dir, final_name)
-                                 if not os.path.exists(output_path):
-                                     final_img.save(output_path)
+                                 final_img = Image.fromarray(final_np); output_path = os.path.join(fuku_face_hoho_dir, final_name)
+                                 if not os.path.exists(output_path): final_img.save(output_path)
                                  hoho_face_images[final_name] = final_img
                         else:
                             final_img = Image.fromarray(kao_np); final_name = "_".join(name_parts) + ".png"
                             output_path = os.path.join(fuku_face_hoho_dir, final_name)
-                            if not os.path.exists(output_path):
-                                final_img.save(output_path)
+                            if not os.path.exists(output_path): final_img.save(output_path)
                             hoho_face_images[final_name] = final_img
-            print(f" > 已處理 {len(hoho_face_images)} 張臉紅妝。")
+            
             if effect_files:
-                print(f"--- [{fuku_base_name}] 流程 B.2: 疊加臉紅妝特效 (fuku_face_hoho_effect) ---")
                 fuku_face_hoho_effect_dir = os.path.join(output_root, "fuku_face_hoho_effect"); ensure_dir(fuku_face_hoho_effect_dir)
                 for face_name, face_img in hoho_face_images.items():
                     for effect_path in effect_files:
@@ -210,15 +201,23 @@ def process_character_directory(char_dir):
                         with Image.open(effect_path) as p_img: final_np = composite_numpy(np.array(face_img), p_img.convert("RGBA"), new_pos)
                         final_name = f"{os.path.splitext(face_name)[0]}_{get_short_name(effect_path)}.png"
                         output_path = os.path.join(fuku_face_hoho_effect_dir, final_name)
-                        if not os.path.exists(output_path):
-                            Image.fromarray(final_np).save(output_path)
+                        if not os.path.exists(output_path): Image.fromarray(final_np).save(output_path)
 
+# ★★★★★【main 函式修改處】★★★★★
 def main():
     script_dir = os.getcwd(); print(f"開始掃描目標資料夾於: {script_dir}")
-    char_dirs_to_process = [root for root, _, files in os.walk(script_dir) if ATLAS_FILE_NAME in files and 'output' not in root[len(script_dir):]]
-    if not char_dirs_to_process: print(f"\n未找到任何包含 '{ATLAS_FILE_NAME}' 的角色資料夾。"); return
+    
+    # 新的判斷條件：同時存在 fuku 資料夾和 offset.json 檔案
+    char_dirs_to_process = [root for root, dirs, files in os.walk(script_dir) 
+                            if FUKU_DIR_NAME in dirs and OFFSET_FILE_NAME in files and 'output' not in root[len(script_dir):]]
+    
+    if not char_dirs_to_process:
+        # 更新提示訊息
+        print(f"\n未找到任何同時包含 '{FUKU_DIR_NAME}' 資料夾與 '{OFFSET_FILE_NAME}' 檔案的角色資料夾。"); return
+    
     for char_dir in char_dirs_to_process:
         process_character_directory(char_dir)
+        
     print(f"\n{'='*60}\n所有角色資料夾處理完畢！\n{'='*60}")
 
 if __name__ == '__main__':
