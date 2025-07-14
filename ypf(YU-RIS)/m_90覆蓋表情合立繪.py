@@ -3,42 +3,41 @@ from PIL import Image
 
 # --- 設定 ---
 # 來源資料夾，腳本會從這裡開始掃描
-SOURCE_FOLDER = 'm_090'
+SOURCE_FOLDER = 'm_066'
 # 輸出資料夾，所有合成後的圖片會儲存在這裡
 OUTPUT_FOLDER = 'output'
-# 【新】用來識別「身體」圖片的檔名後綴，按優先順序列出
-BODY_IMAGE_SUFFIXES = ['100.png', '000.png']
+
+# 【最終正確規則】根據您的最新指正，更新身體圖片的檔名後綴
+# 優先尋找 *0100.png，若無，則尋找 *0000.png
+BODY_IMAGE_SUFFIXES = ['0000.png', '0100.png']
 
 def compose_images_in_folder(folder_path):
     """
     處理單一資料夾中的圖片合成。
-    1. 按照優先級尋找身體圖片 ('100.png' -> '000.png')。
+    1. 按照優先級尋找身體圖片 ('0100.png' -> '0000.png')。
     2. 找到所有表情圖片。
     3. 儲存身體圖片和合成圖（如果目標不存在）。
     """
     print(f"正在處理資料夾：{folder_path}")
 
-    # --- 1. 【邏輯更新】按照優先級尋找身體圖片 ---
+    # --- 1. 按照優先級尋找身體圖片 ---
     body_image_path = None
     all_png_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.png')]
 
     for suffix in BODY_IMAGE_SUFFIXES:
         for filename in all_png_files:
             if filename.lower().endswith(suffix):
-                # 找到了，設定路徑並停止搜尋
                 body_image_path = os.path.join(folder_path, filename)
                 print(f"  找到身體 (使用規則 *{suffix}): {filename}")
                 break
         if body_image_path:
-            break  # 已經找到身體，跳出最外層迴圈
+            break
 
     # --- 2. 檢查與分類 ---
-    # 如果遍歷所有規則後，仍未找到身體圖片
     if not body_image_path:
         print(f"  [跳過] 在 {folder_path} 中找不到任何身體圖片 (規則: {BODY_IMAGE_SUFFIXES})。")
         return
 
-    # 表情圖片是除了身體以外的所有png圖
     body_filename = os.path.basename(body_image_path)
     emotion_image_paths = [os.path.join(folder_path, f) for f in all_png_files if f != body_filename]
     
@@ -54,7 +53,6 @@ def compose_images_in_folder(folder_path):
     with Image.open(body_image_path) as body_img:
         body_img = body_img.convert('RGBA')
 
-        # 儲存身體圖片本身
         output_path_for_body = os.path.join(output_dir, body_filename)
 
         if os.path.exists(output_path_for_body):
