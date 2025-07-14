@@ -6,39 +6,42 @@ from PIL import Image
 SOURCE_FOLDER = 'm_090'
 # 輸出資料夾，所有合成後的圖片會儲存在這裡
 OUTPUT_FOLDER = 'output'
-# 用來識別「身體」圖片的檔名後綴
-BODY_IMAGE_SUFFIX = '100.png'
+# 【新】用來識別「身體」圖片的檔名後綴，按優先順序列出
+BODY_IMAGE_SUFFIXES = ['100.png', '000.png']
 
 def compose_images_in_folder(folder_path):
     """
     處理單一資料夾中的圖片合成。
-    1. 找到身體圖片和所有表情圖片。
-    2. 建立輸出資料夾。
-    3. 儲存身體圖片原圖（如果目標不存在）。
-    4. 將每張表情疊加到身體上，並儲存合成圖（如果目標不存在）。
+    1. 按照優先級尋找身體圖片 ('100.png' -> '000.png')。
+    2. 找到所有表情圖片。
+    3. 儲存身體圖片和合成圖（如果目標不存在）。
     """
     print(f"正在處理資料夾：{folder_path}")
 
-    # --- 1. 整理檔案列表，找出身體和表情 ---
+    # --- 1. 【邏輯更新】按照優先級尋找身體圖片 ---
     body_image_path = None
-    emotion_image_paths = []
-    
-    for filename in os.listdir(folder_path):
-        if filename.lower().endswith('.png'):
-            full_path = os.path.join(folder_path, filename)
-            if filename.lower().endswith(BODY_IMAGE_SUFFIX):
-                if body_image_path is None:
-                    body_image_path = full_path
-                else:
-                    print(f"  [警告] 在 {folder_path} 中找到多個身體圖片，將只使用第一個。")
-            else:
-                emotion_image_paths.append(full_path)
+    all_png_files = [f for f in os.listdir(folder_path) if f.lower().endswith('.png')]
 
-    # --- 2. 檢查是否有必要的圖片 ---
+    for suffix in BODY_IMAGE_SUFFIXES:
+        for filename in all_png_files:
+            if filename.lower().endswith(suffix):
+                # 找到了，設定路徑並停止搜尋
+                body_image_path = os.path.join(folder_path, filename)
+                print(f"  找到身體 (使用規則 *{suffix}): {filename}")
+                break
+        if body_image_path:
+            break  # 已經找到身體，跳出最外層迴圈
+
+    # --- 2. 檢查與分類 ---
+    # 如果遍歷所有規則後，仍未找到身體圖片
     if not body_image_path:
-        print(f"  [跳過] 在 {folder_path} 中找不到身體圖片。")
+        print(f"  [跳過] 在 {folder_path} 中找不到任何身體圖片 (規則: {BODY_IMAGE_SUFFIXES})。")
         return
 
+    # 表情圖片是除了身體以外的所有png圖
+    body_filename = os.path.basename(body_image_path)
+    emotion_image_paths = [os.path.join(folder_path, f) for f in all_png_files if f != body_filename]
+    
     if not emotion_image_paths:
         print(f"  [提示] 在 {folder_path} 中找不到任何表情圖片，但仍會處理身體圖片。")
 
@@ -48,15 +51,12 @@ def compose_images_in_folder(folder_path):
     os.makedirs(output_dir, exist_ok=True)
 
     # --- 4. 處理並儲存身體圖片 ---
-    # 打開身體圖片
     with Image.open(body_image_path) as body_img:
         body_img = body_img.convert('RGBA')
 
-        # 【新功能】儲存身體圖片本身
-        body_filename = os.path.basename(body_image_path)
+        # 儲存身體圖片本身
         output_path_for_body = os.path.join(output_dir, body_filename)
 
-        # 【新功能】檢查檔案是否已存在
         if os.path.exists(output_path_for_body):
             print(f"    [跳過] 身體檔案已存在: {output_path_for_body}")
         else:
@@ -69,10 +69,9 @@ def compose_images_in_folder(folder_path):
                 output_filename = os.path.basename(emotion_path)
                 output_path = os.path.join(output_dir, output_filename)
 
-                # 【新功能】在合成前就檢查檔案是否存在，若存在則直接跳到下一個
                 if os.path.exists(output_path):
                     print(f"    [跳過] 合成檔案已存在: {output_path}")
-                    continue  # 繼續處理下一個表情
+                    continue
 
                 with Image.open(emotion_path) as emotion_img:
                     emotion_img = emotion_img.convert('RGBA')
@@ -96,7 +95,6 @@ def main():
         return
 
     for dirpath, subdirs, _ in os.walk(SOURCE_FOLDER):
-        # 只處理沒有子資料夾的「最深層」資料夾
         if not subdirs:
             compose_images_in_folder(dirpath)
 
