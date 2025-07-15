@@ -8,7 +8,7 @@ import re
 
 def parse_pos_file(filepath):
     """
-    (「超級閱讀器」) 使用手動括號匹配的強大解析器，確保能正確讀取巢狀結構。
+    (再次加固) 無論 fgpos 在檔案何處，都能找到並解析它。
     """
     if not os.path.exists(filepath):
         print("資訊: 未在腳本目錄下找到 pos.txt。")
@@ -17,42 +17,69 @@ def parse_pos_file(filepath):
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        content = re.sub(r'--.*', '', content)
-        content = content.strip()
-        if content.startswith('fgpos='):
-            content = content[len('fgpos='):]
-        content = content.strip().lstrip('{').rstrip('}')
+        # 1. 在整個檔案內容中，先定位到 fgpos={...} 的區塊
+        fgpos_marker = 'fgpos={'
+        try:
+            fgpos_start_index = content.find(fgpos_marker)
+            if fgpos_start_index == -1:
+                print(f"警告: 在 pos.txt 中未找到 '{fgpos_marker}' 區塊。")
+                return None
+        except ValueError:
+            print(f"警告: 在 pos.txt 中未找到 '{fgpos_marker}' 區塊。")
+            return None
+
+        # 2. 從 fgpos={ 的開頭，手動尋找與之匹配的結束括號 '}'
+        brace_level = 1
+        search_start_pos = fgpos_start_index + len(fgpos_marker)
+        fgpos_end_index = -1
+        for i in range(search_start_pos, len(content)):
+            char = content[i]
+            if char == '{':
+                brace_level += 1
+            elif char == '}':
+                brace_level -= 1
+            
+            if brace_level == 0:
+                fgpos_end_index = i
+                break
         
+        if fgpos_end_index == -1:
+            print("警告: pos.txt 中的 'fgpos' 區塊結構不完整（找不到結束的 '}'）。")
+            return None
+
+        # 3. 只取出 fgpos 區塊內部的內容進行解析
+        fgpos_content = content[search_start_pos:fgpos_end_index]
+
+        # 4. 使用之前驗證過的、強大的解析器來解析 fgpos_content
         pos_data = {}
         cursor = 0
         block_start_regex = re.compile(r'([\w\d]+)\s*=\s*\{')
 
-        while cursor < len(content):
-            match = block_start_regex.search(content, cursor)
+        while cursor < len(fgpos_content):
+            match = block_start_regex.search(fgpos_content, cursor)
             if not match:
                 break
 
             block_name = match.group(1)
             content_start_pos = match.end()
             
-            brace_level = 1
-            content_end_pos = -1
-            for i in range(content_start_pos, len(content)):
-                char = content[i]
+            brace_level_inner = 1
+            content_end_pos_inner = -1
+            for i in range(content_start_pos, len(fgpos_content)):
+                char = fgpos_content[i]
                 if char == '{':
-                    brace_level += 1
+                    brace_level_inner += 1
                 elif char == '}':
-                    brace_level -= 1
+                    brace_level_inner -= 1
                 
-                if brace_level == 0:
-                    content_end_pos = i
+                if brace_level_inner == 0:
+                    content_end_pos_inner = i
                     break
             
-            if content_end_pos == -1:
-                print(f"警告: pos.txt 在 '{block_name}' 區塊後結構不完整，解析可能中斷。")
+            if content_end_pos_inner == -1:
                 break 
 
-            block_content = content[content_start_pos:content_end_pos].strip()
+            block_content = fgpos_content[content_start_pos:content_end_pos_inner].strip()
             
             if re.match(r'^\s*x\s*=', block_content):
                 coord_match = re.search(r'x\s*=\s*(\d+)\s*,\s*y\s*=\s*(\d+)', block_content)
@@ -66,9 +93,9 @@ def parse_pos_file(filepath):
                     item_name, x, y = item.groups()
                     pos_data[block_name][item_name] = {'x': int(x), 'y': int(y)}
 
-            cursor = content_end_pos + 1
+            cursor = content_end_pos_inner + 1
         
-        print("成功讀取並解析 pos.txt。")
+        print("成功讀取並解析 pos.txt 中的 fgpos 區塊。")
         return pos_data
     except Exception as e:
         print(f"錯誤: 解析 pos.txt 時發生問題: {e}")
@@ -154,34 +181,26 @@ def process_directory(source_path, pos_data):
     
     FUKU_DIR = os.path.join(source_path, "fuku")
     
-    # ##################################################################
-    # ### 步驟一：鎖定座標容器 (檔名推導邏輯) ###
-    # ##################################################################
+    # 步驟一：鎖定座標容器 (檔名推導邏輯)
     current_pos_map = None
     fuku_files = get_files_safely(FUKU_DIR)
     if pos_data and fuku_files:
-        # 遍歷 fuku 檔案，直到從中成功推導出一個有效的容器鍵
         for f_name in sorted(fuku_files): 
             f_basename = os.path.splitext(f_name)[0]
             
-            # 從檔名中移除結尾的數字來推導鍵名 (e.g., 'tay_noa0400' -> 'tay_noa')
             match = re.match(r'(.+?)(\d+)$', f_basename)
             if not match:
-                # 如果檔名不以數字結尾 (例如 a0001.png)，則跳過，用下一個檔案嘗試
                 continue
                 
             derived_key = match.group(1)
             
-            # 檢查推導出的鍵是否存在於 pos.txt 中，且是一個容器 (而不是直接座標)
             if derived_key in pos_data and isinstance(pos_data[derived_key], dict) and 'x' not in pos_data[derived_key]:
                 current_pos_map = pos_data[derived_key]
                 print(f"資訊: 已根據檔名 '{f_name}' 推導並鎖定座標容器 '{derived_key}'。")
-                # 成功找到，跳出迴圈
-                break
+                break 
     
     if not current_pos_map:
         print(f"警告: 未能從 '{FUKU_DIR}' 的任何檔名中推導出有效的座標容器。")
-    # ##################################################################
 
     # 後續路徑設定
     KAO_DIR = os.path.join(source_path, "kao")
@@ -298,6 +317,7 @@ def process_directory(source_path, pos_data):
 def find_and_process_directories(start_path='.'):
     """掃描並處理所有符合條件的專案資料夾。"""
     print("開始掃描專案資料夾...")
+    # 執行腳本時，pos.txt 應與 .py 檔案放在同一個目錄
     pos_data = parse_pos_file('pos.txt')
     found_projects = 0
     for root, dirs, files in os.walk(start_path):
