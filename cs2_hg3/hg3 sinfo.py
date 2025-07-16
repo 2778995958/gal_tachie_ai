@@ -16,8 +16,7 @@ def load_layer_database(txt_path: str) -> Dict[str, LayerData]:
             reader = csv.DictReader(f, delimiter='\t')
             for row in reader:
                 try:
-                    full_file_name = row['FileName']
-                    base_name = os.path.splitext(full_file_name)[0]
+                    base_name = os.path.splitext(row['FileName'])[0]
                     db[base_name.lower()] = LayerData(file_name=row['FileName'], canvas_width=int(row['CanvasWidth']), canvas_height=int(row['CanvasHeight']), offset_x=int(row['OffsetX']), offset_y=int(row['OffsetY']))
                 except (KeyError, ValueError): continue
     except FileNotFoundError:
@@ -48,56 +47,8 @@ def compose_image(recipe: List[str], db: Dict[str, LayerData], img_folder: str, 
             base_crop = canvas.crop(box); composite_crop = Image.alpha_composite(base_crop, fragment); canvas.paste(composite_crop, box)
     return canvas
 
-# --- 2. 主程式 ---
-def main():
-    DB_FILE = 'hg3_coordinates.txt'; IMAGES_DIR = 'images'; RECIPE_FILE = 'recipes.txt'; OUTPUT_DIR = 'output_final'
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    layer_db = load_layer_database(DB_FILE)
-    if not layer_db: return
-
-    # --- 階段一: 解析配方檔 ---
-    all_instructions = []
-    try:
-        with open(RECIPE_FILE, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter='\t')
-            for i, row in enumerate(reader):
-                if not row or not row[0] or row[0].strip().startswith('#') or len(row) < 3: continue
-                
-                class_type = row[0].strip()
-                group_id = row[1].strip()
-                
-                # 【V37 核心修正】: 自動移除 layer_name 中可能存在的 .hg3 副檔名
-                layer_name_raw = row[2].strip()
-                layer_name = os.path.splitext(layer_name_raw)[0]
-                
-                all_instructions.append({'class': class_type, 'id': group_id, 'layer': layer_name, 'order': i})
-        print(f"📖 成功解析 {len(all_instructions)} 條圖層指令。")
-    except FileNotFoundError:
-        print(f"致命錯誤：找不到配方檔 '{RECIPE_FILE}'。"); return
-    
-    if not all_instructions: print("錯誤: 配方檔為空。"); return
-        
-    # --- 階段二: 按角色分組 ---
-    char_ingredients = defaultdict(list)
-    for instruction in all_instructions:
-        layer_name = instruction.get('layer')
-        if layer_name:
-            if '_' in layer_name:
-                prefix = layer_name.rsplit('_', 1)[0]
-            else:
-                prefix = layer_name
-            char_ingredients[prefix].append(instruction)
-    print(f"ℹ️ 檢測到 {len(char_ingredients)} 個角色組: {list(char_ingredients.keys())}")
-
-    # --- 階段三: 遍歷每個角色組，獨立處理 ---
-    print("\n🏭 合成工廠啟動...")
-    for prefix, instructions in char_ingredients.items():
-        process_character_group(prefix, instructions, layer_db, IMAGES_DIR, OUTPUT_DIR)
-        
-    print("\n✨ 所有任務已處理完畢！")
-
-
+# --- 2. 針對單一角色組的處理函式 ---
+# 【V38 NameError 修正】: 函式定義中加入了 db 參數
 def process_character_group(prefix: str, instructions: List[Dict], db: Dict, img_dir: str, output_dir: str):
     print(f"\n--- 正在處理角色組: {prefix} ---")
     
@@ -113,32 +64,30 @@ def process_character_group(prefix: str, instructions: List[Dict], db: Dict, img
     base_faces = defaultdict(list); face_options = []
     for item in instructions:
         class_type, group_id, layer_name = item['class'], item['id'], item['layer']
-        if class_type == 'dress': base_outfits[group_id].append(layer_name)
-        elif class_type == 'face': base_faces[group_id].append(layer_name)
+        if class_type == 'dress': base_outfits[group_id].append(item)
+        elif class_type == 'face': base_faces[group_id].append(item)
         elif class_type == 'dupdress': outfit_options.append(item)
         elif class_type == 'dupface': face_options.append(item)
 
-    # 生成所有可能的 Outfit 組合配方
     final_outfits = {}
     if not base_outfits: final_outfits[''] = []
     else:
-        for gid, layers in base_outfits.items(): final_outfits[gid] = [{'layer': l} for l in layers]
+        for gid, items in base_outfits.items(): final_outfits[gid] = items
         for i in range(1, len(outfit_options) + 1):
             for combo in combinations(outfit_options, i):
                 for base_id, base_items in base_outfits.items():
                     new_id = base_id + "".join(sorted(opt['id'] for opt in combo))
-                    final_outfits[new_id] = [{'layer': l} for l in base_items] + list(combo)
+                    final_outfits[new_id] = base_items + list(combo)
 
-    # 生成所有可能的 Face 組合配方
     final_faces = {}
     if not base_faces: final_faces[''] = []
     else:
-        for gid, layers in base_faces.items(): final_faces[gid] = [{'layer': l} for l in layers]
+        for gid, items in base_faces.items(): final_faces[gid] = items
         for i in range(1, len(face_options) + 1):
             for combo in combinations(face_options, i):
                 for base_id, base_items in base_faces.items():
                     new_id = base_id + "".join(sorted(opt['id'] for opt in combo))
-                    final_faces[new_id] = [{'layer': l} for l in base_items] + list(combo)
+                    final_faces[new_id] = base_items + list(combo)
     
     image_cache = {}
     print(f"  🔄 正在組合 {len(final_outfits)} 套衣服與 {len(final_faces)} 個表情...")
@@ -146,9 +95,15 @@ def process_character_group(prefix: str, instructions: List[Dict], db: Dict, img
         for face_id, face_items in final_faces.items():
             
             all_items_for_recipe = outfit_items + face_items
-            # 根據原始順序對 all_instructions 中的對應項進行排序
-            recipe_map = {item['layer']: item for item in instructions}
-            all_items_for_recipe.sort(key=lambda x: recipe_map.get(x['layer'], {}).get('order', float('inf')))
+
+            # 【V38 排序規則修正】: 根據檔名後綴的長度進行排序
+            def get_suffix_length(item):
+                layer_name = item['layer']
+                if '_' in layer_name:
+                    return len(layer_name.rsplit('_', 1)[-1])
+                return len(layer_name) # 如果沒有底線，就用整個名稱長度
+
+            all_items_for_recipe.sort(key=get_suffix_length)
             
             final_ordered_layers = [item['layer'] for item in all_items_for_recipe]
             
@@ -158,10 +113,49 @@ def process_character_group(prefix: str, instructions: List[Dict], db: Dict, img
             output_path = os.path.join(output_dir, output_filename)
 
             print(f"    - 正在合成: {output_filename}")
-            final_image = compose_image(final_ordered_layers, layer_db, img_dir, canvas_size, image_cache)
+            final_image = compose_image(final_ordered_layers, db, img_dir, canvas_size, image_cache)
             if final_image:
                 final_image.save(output_path)
                 print(f"      ✅ 已儲存。")
-                
+
+# --- 3. 主程式 ---
+def main():
+    DB_FILE = 'hg3_coordinates.txt'; IMAGES_DIR = 'images'; RECIPE_FILE = 'recipes.txt'; OUTPUT_DIR = 'output_final'
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    layer_db = load_layer_database(DB_FILE)
+    if not layer_db: return
+
+    all_instructions = []
+    try:
+        with open(RECIPE_FILE, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f, delimiter='\t')
+            for i, row in enumerate(reader):
+                if not row or not row[0] or row[0].strip().startswith('#') or len(row) < 3: continue
+                class_type, group_id, layer_name = [col.strip() for col in row[:3]]
+                layer_name_no_ext = os.path.splitext(layer_name)[0]
+                all_instructions.append({'class': class_type, 'id': group_id, 'layer': layer_name_no_ext, 'order': i})
+        print(f"📖 成功解析 {len(all_instructions)} 條圖層指令。")
+    except FileNotFoundError:
+        print(f"致命錯誤：找不到配方檔 '{RECIPE_FILE}'。"); return
+    
+    if not all_instructions: print("錯誤: 配方檔為空。"); return
+
+    char_ingredients = defaultdict(list)
+    for instruction in all_instructions:
+        layer_name = instruction.get('layer')
+        if layer_name:
+            if '_' in layer_name: prefix = layer_name.rsplit('_', 1)[0]
+            else: prefix = layer_name
+            char_ingredients[prefix].append(instruction)
+    print(f"ℹ️ 檢測到 {len(char_ingredients)} 個角色組: {list(char_ingredients.keys())}")
+
+    print("\n🏭 合成工廠啟動...")
+    for prefix, instructions in char_ingredients.items():
+        # 將 db 傳遞進去
+        process_character_group(prefix, instructions, layer_db, IMAGES_DIR, OUTPUT_DIR)
+        
+    print("\n✨ 所有任務已處理完畢！")
+
 if __name__ == "__main__":
     main()
