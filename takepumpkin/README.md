@@ -1,1 +1,4 @@
 就只是竹子社合成webp的動圖
+
+
+Kaguya_Reader，參考GetKaguyaXY，但缺了anm解析，找了kaguyacut加anm座標
