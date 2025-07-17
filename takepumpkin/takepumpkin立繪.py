@@ -275,7 +275,7 @@ def main():
     script_dir = os.getcwd()
     print(f"程式啟動於: {script_dir}")
     print("開始掃描所有子資料夾...")
-    offset_file_path = os.path.join(script_dir, "AlpXY_Offset(Auto).txt")
+    offset_file_path = os.path.join(script_dir, "Kaguya_XY_Offset(Auto).txt")
     offset_coords = load_offset_coords(offset_file_path)
     if offset_coords is None:
         input("錯誤：找不到或無法讀取座標檔，請按 Enter 鍵結束。")
