@@ -37,3 +37,13 @@
         ```bash
         python escude_tools.py -s "C:\path\to\images" "C:\path\to\db.db"
         ```
+
+      * **合成 CG：**
+        ```bash
+        python escude_tools.py -c "C:\path\to\images" "C:\path\to\db.db"
+        ```
+        
+      * **將 .bin 轉換為 .db：**
+        ```bash
+        python escude_tools.py -d "C:\path\to\your\data"
+        ```
