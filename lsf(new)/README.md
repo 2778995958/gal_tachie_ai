@@ -30,11 +30,12 @@ options:
 
 ```
 用法:
-GARbro解出CG整個資料夾=<EvPath>或ST整個資料夾<StPath>
+GARbro解出CG整個資料夾=<EvPath>或立繪ST整個資料夾<StPath>
 解data.bin裡面的db_graphics.bin
 
 escude_tools_2.py -d "C:\path\to\your\放bin資料夾"
-escude_tools_2.py -ev "C:\path\to\your\放圖檔連lsf的資料夾" "C:\path\to\your\unpacked_output\db_graphics.db"
+escude_tools_2.py -ev "C:\path\to\your\放CG圖檔連lsf的資料夾" "C:\path\to\your\unpacked_output\db_graphics.db" -j 8
+escude_tools_2.py -s "C:\path\to\your\放ST圖檔連lsf的資料夾" "C:\path\to\your\unpacked_output\db_graphics.db" -b 0,2 -j 8
 
 完成
 ```
