@@ -40,7 +40,7 @@ escude_tools_2.py -s "C:\path\to\your\放ST圖檔連lsf的資料夾" "C:\path\to
 完成
 ```
 
-v1做法
+v1做法(ai生成的缺點就是弄一弄就很多版本，但現在我應該不會用v1)
 ```
 usage: escude_tools_1.py [-h] [-d <bin_dir>] [-c <EvPath> <db_path>] [-s <StPath> <db_path>] [-b <mode>]
                          [-export_lsf <LsfPath>]
