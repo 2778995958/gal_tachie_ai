@@ -29,9 +29,13 @@ options:
 ```
 
 ```
-用法: 
-escude_tools_2.py -d "C:\path\to\your\bin_files"
-escude_tools_2.py -ev <EvPath> <db_path>(要有.db)
+用法:
+GARbro解出CG整個資料夾=<EvPath>或ST整個資料夾<StPath>
+解data.bin裡面的db_graphics.bin
+
+escude_tools_2.py -d "C:\path\to\your\放bin資料夾"
+escude_tools_2.py -ev "C:\path\to\your\放圖檔連lsf的資料夾" "C:\path\to\your\unpacked_output\db_graphics.db"
+
 完成
 ```
 
