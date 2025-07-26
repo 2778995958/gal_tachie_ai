@@ -2,6 +2,8 @@
 
 但對於不懂程序的人，只好全丟ai處理，換成python，經過一輪ai debug幾百次，粗用應該可以，雖然只能解圖
 
+臉紅問題，不知哪個遊戲適用，因為我只是看廃村少女［弐］是用p2:1去改
+
 v2做法
 ```
 usage: escude_tools_2.py [-h] [-d <bin_dir>] [-a <LsfPath>] [-ev <EvPath> <db_path>] [-s <StPath> <db_path>]
