@@ -2,47 +2,6 @@
 
 但對於不懂程序的人，只好全丟ai處理，換成python，經過一輪觀察應該可以了，雖然只能解圖
 
-*  **執行命令**：
-
-      * **只產生「無臉紅」版本：**
-        在 `-s` 命令後加上 `-b 0`。輸出的檔名會像 `..._b0.png`。
-
-        ```bash
-        python escude_tools.py -s "C:\path\to\images" "C:\path\to\db.db" -b 0
-        ```
-
-      * **只產生「原始定義」版本：**
-        在 `-s` 命令後加上 `-b 1`。輸出的檔名會像 `..._b1.png`。
-
-        ```bash
-        python escude_tools.py -s "C:\path\to\images" "C:\path\to\db.db" -b 1
-        ```
-
-      * **只產生「臉紅 B」版本：**
-        在 `-s` 命令後加上 `-b 2`。輸出的檔名會像 `..._b2.png`。
-
-        ```bash
-        python escude_tools.py -s "C:\path\to\images" "C:\path\to\db.db" -b 2
-        ```
-
-      * **產生所有可用版本（預設行為）：**
-        不加 `-b` 選項，行為和上一版一樣，會自動產生所有版本。
-
-        ```bash
-        python escude_tools.py -s "C:\path\to\images" "C:\path\to\db.db"
-        ```
-
-      * **合成 CG：**
-        ```bash
-        python escude_tools.py -c "C:\path\to\images" "C:\path\to\db.db"
-        ```
-        
-      * **將 .bin 轉換為 .db：**
-        ```bash
-        python escude_tools.py -d "C:\path\to\your\data"
-        ```
-
-
 v2做法
 ```
 usage: escude_tools_2.py [-h] [-d <bin_dir>] [-a <LsfPath>] [-ev <EvPath> <db_path>] [-s <StPath> <db_path>]
@@ -66,4 +25,25 @@ options:
                           範例: -b 0,2 (只生成無臉紅和臉紅B)
   -export_lsf <LsfPath>
                         [匯出] 匯出 LSF 圖層資訊到 CSV。
-  -j, --jobs <num>      [優化] 指定使用的 CPU 核心數量 (預設: 全部可用核心)。```
+  -j, --jobs <num>      [優化] 指定使用的 CPU 核心數量 (預設: 全部可用核心)。
+```
+
+v1做法
+```
+usage: escude_tools_1.py [-h] [-d <bin_dir>] [-c <EvPath> <db_path>] [-s <StPath> <db_path>] [-b <mode>]
+                         [-export_lsf <LsfPath>]
+
+一個用於處理 Escude 遊戲引擎資源的 Python 整合工具。
+
+options:
+  -h, --help            show this help message and exit
+  -d <bin_dir>          [解包] 將指定目錄下的所有 .bin 檔案轉換為 .db 資料庫。
+  -c <EvPath> <db_path>
+                        [合成] 合成事件 (EV) 圖片 (檔名會包含CG鑑賞ID)。
+  -s <StPath> <db_path>
+                        [合成] 合成角色立繪 (ST) 圖片 (可搭配-b選項)。
+  -b <mode>             [用於 -s] 指定臉紅模式:
+                          0=無臉紅, 1=原始定義, 2=臉紅B
+  -export_lsf <LsfPath>
+                        [匯出] 匯出 LSF 圖層資訊到 CSV。
+```
