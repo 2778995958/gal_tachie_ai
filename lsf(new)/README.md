@@ -1,6 +1,6 @@
 找了一輪，找到Chenx221大佬寫的[EscudeTools](https://github.com/Chenx221/EscudeTools)
 
-但對於不懂程序的人，只好全丟ai處理，換成python，經過一輪觀察應該可以了，雖然只能解圖
+但對於不懂程序的人，只好全丟ai處理，換成python，經過一輪ai debug幾百次，粗用應該可以，雖然只能解圖
 
 v2做法
 ```
