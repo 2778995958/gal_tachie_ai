@@ -45,40 +45,25 @@
 
 v2做法
 ```
-usage: compose_images.py [-h] [-db <ImgPath> <db_path>] [-a <LsfPath>] [-d <bin_dir>] [-s <StPath> <db_path>]
-
+usage: escude_tools_2.py [-h] [-d <bin_dir>] [-a <LsfPath>] [-ev <EvPath> <db_path>] [-s <StPath> <db_path>]
                          [-b <modes>] [-export_lsf <LsfPath>] [-j <num>]
 
 一個用於處理 Escude 遊戲引擎資源的 Python 整合工具。
 
 options:
-
   -h, --help            show this help message and exit
-  
-  -db <ImgPath> <db_path>
-  
-                        [全自動合成] 根據 .db 檔案全自動合成所有圖片 (推薦)。
-                        
-  -a <LsfPath>          [通用合成] 強制合成指定目錄下所有LSF檔案(組合全部圖層)。
-  
   -d <bin_dir>          [解包] 將指定目錄下的所有 .bin 檔案轉換為 .db 資料庫。
-  
+                                 範例: -d "C:\path\to\your\bin_files"
+  -a <LsfPath>          [通用合成] 強制合成指定目錄下所有LSF檔案(組合全部圖層)。
+  -ev <EvPath> <db_path>
+                        [合成] 合成事件 (EV) 圖片 (檔名會包含CG鑑賞ID)。
   -s <StPath> <db_path>
-  
-                        [合成] 合成角色立繪 (ST) 圖片 (可搭配-b選項)。
-                        
+                        [合成] 合成角色立繪 (ST) 圖片 (檔名已優化，可搭配-b)。
   -b <modes>            [用於 -s] 指定臉紅模式 (可多選，用逗號分隔):
-  
                           0 = 無臉紅 (移除 p2)
-                          
                           1 = 原始定義 (通常為 p2:1)
-                          
                           2 = 臉紅B (使用 p2:2)
-                          
                           範例: -b 0,2 (只生成無臉紅和臉紅B)
-                          
   -export_lsf <LsfPath>
-  
                         [匯出] 匯出 LSF 圖層資訊到 CSV。
-                        
   -j, --jobs <num>      [優化] 指定使用的 CPU 核心數量 (預設: 全部可用核心)。```
