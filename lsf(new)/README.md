@@ -28,6 +28,13 @@ options:
   -j, --jobs <num>      [優化] 指定使用的 CPU 核心數量 (預設: 全部可用核心)。
 ```
 
+```
+用法: 
+escude_tools_2.py -d "C:\path\to\your\bin_files"
+escude_tools_2.py -ev <EvPath> <db_path>(要有.db)
+完成
+```
+
 v1做法
 ```
 usage: escude_tools_1.py [-h] [-d <bin_dir>] [-c <EvPath> <db_path>] [-s <StPath> <db_path>] [-b <mode>]
