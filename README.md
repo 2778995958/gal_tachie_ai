@@ -1,4 +1,8 @@
 # gal_tachie_ai
-只是用(gemini 2.5 pro)ai寫合拼生成立繪的紀錄，只適用我個人
+只是用AI(gemini 2.5 pro)寫合拼生成立繪的紀錄，只適用我個人
 
 基本上回答不了任何問題，因為我不會寫程式
+
+大部分可能不懂找組裝說明只能自己循環組合
+
+所以很多情況會有fuku,kao,hoho,effect,kami,kuchi等等資料夾去人手分類圖片
