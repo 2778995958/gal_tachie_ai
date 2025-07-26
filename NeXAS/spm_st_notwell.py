@@ -1,11 +1,11 @@
-# final_assembler.py (v23.0 - The Regex Hunter Edition)
-# 最終版：採用強大的正規表示式來掃描並提取檔名，以應對不同SPM檔案的格式差異。
+# final_assembler.py (v24.0 - The Precision Engine Edition)
+# 最終版：引入了基於 NumPy 的高精度 Alpha Blending 引擎，以徹底解決合圖後的灰線問題。
 
 import struct
 import os
 import sys
 import glob
-import re # 導入正規表示式模組
+import re
 from dataclasses import dataclass
 from typing import List, Dict
 from io import BytesIO
@@ -14,42 +14,77 @@ try:
 except ImportError:
     print("錯誤：Pillow 函式庫未安裝。請執行 'pip install Pillow'")
     sys.exit(1)
+try:
+    import numpy as np
+except ImportError:
+    print("錯誤：NumPy 函式庫未安裝。請執行 'pip install numpy'")
+    sys.exit(1)
 
-# --- 1. 檔名解析器 (全新升級) ---
+# --- 1. 檔名解析器 (與 v23 相同) ---
 def parse_filenames_from_spm(file_path: str) -> List[str]:
-    """
-    使用正規表示式直接從檔案末尾的二進位數據中提取檔名列表。
-    """
     with open(file_path, 'rb') as f:
         file_content = f.read()
-
     filenames = []
     try:
-        # 取檔案最後的 2KB 進行掃描，這個範圍足夠安全
         scan_chunk = file_content[-2048:]
-        
-        # 將二進位數據解碼為字串，忽略任何解碼錯誤
         decoded_text = scan_chunk.decode('sjis', 'ignore')
-        
-        # 【核心變更】使用正規表示式查找所有符合 "stXXXX.png" 模式的字串
-        # 這個模式能夠靈活匹配 stany11.png, stksm31a.png, stats11leg.png 等所有變體
         pattern = r'st[a-zA-Z0-9]+\.png'
-        
         found_names = re.findall(pattern, decoded_text, re.IGNORECASE)
-        
         if not found_names:
             raise ValueError("正規表示式掃描器在檔案末尾找不到任何符合模式的檔名。")
-            
-        # 使用 dict.fromkeys 來移除重複的檔名，同時保持原始順序
         ordered_filenames = list(dict.fromkeys(found_names))
         filenames = ordered_filenames
-
     except Exception as e:
         print(f"  [警告] 解析檔名列表時出錯: {e}。")
-
     return filenames
 
-# --- 2. 規則合成器 (與 v22 相同) ---
+# --- ★★★ 2. 全新高精度合成引擎 ★★★ ---
+def composite_numpy(base_img: Image.Image, overlay_img: Image.Image, position=(0, 0)) -> Image.Image:
+    """
+    使用基於 NumPy 的標準 Alpha Blending 公式進行高精度圖像合成。
+    """
+    # 將 PIL 圖像轉換為 NumPy 陣列，並將像素值轉為 0.0-1.0 的浮點數
+    base_np = np.array(base_img, dtype=np.float64) / 255.0
+    overlay_np = np.array(overlay_img, dtype=np.float64) / 255.0
+
+    base_h, base_w = base_np.shape[:2]
+    overlay_h, overlay_w = overlay_np.shape[:2]
+    
+    # 建立一個與底圖同大的透明圖層，用來放置前景
+    fg_layer = np.zeros_like(base_np)
+
+    # 計算貼上範圍，確保不超出邊界
+    x, y = position
+    x1, y1 = max(x, 0), max(y, 0)
+    x2, y2 = min(x + overlay_w, base_w), min(y + overlay_h, base_h)
+    
+    overlay_x1, overlay_y1 = x1 - x, y1 - y
+    overlay_x2, overlay_y2 = x2 - x, y2 - y
+
+    # 如果有重疊區域，則將前景圖的對應部分複製到透明圖層上
+    if x1 < x2 and y1 < y2:
+        fg_layer[y1:y2, x1:x2] = overlay_np[overlay_y1:overlay_y2, overlay_x1:overlay_x2]
+
+    # 從 NumPy 陣列中分離出 RGB 和 Alpha 通道
+    bg_rgb, bg_a = base_np[:,:,:3], base_np[:,:,3:4]
+    fg_rgb, fg_a = fg_layer[:,:,:3], fg_layer[:,:,3:4]
+
+    # 標準 Alpha Blending 公式
+    out_a = fg_a + bg_a * (1.0 - fg_a)
+    
+    out_rgb = np.zeros_like(bg_rgb)
+    # 建立一個遮罩，只在 Alpha > 0 的地方進行除法，避免除以零的錯誤
+    mask = out_a > 1e-6
+    numerator = fg_rgb * fg_a + bg_rgb * bg_a * (1.0 - fg_a)
+    np.divide(numerator, out_a, where=mask, out=out_rgb)
+
+    # 合併計算後的 RGBA 通道，並轉回 8-bit 整數 (0-255)
+    final_np_float = np.concatenate([out_rgb, out_a], axis=2)
+    final_np_uint8 = (final_np_float * 255).round().astype(np.uint8)
+
+    return Image.fromarray(final_np_uint8, 'RGBA')
+
+# --- 3. 規則合成器 (已升級為使用新引擎) ---
 def assemble_images_by_rules(spm_filename: str, filenames: List[str], images_dir: str, output_dir: str, file_lookup: Dict[str, str]):
     if not filenames:
         print("  > 檔名列表為空，跳過合成。")
@@ -73,18 +108,20 @@ def assemble_images_by_rules(spm_filename: str, filenames: List[str], images_dir
         if leg_pieces:
             leg_piece_name = leg_pieces[0]
             leg_image_path = file_lookup.get(leg_piece_name.lower())
-            if not leg_image_path:
-                print(f"    [警告] 找到了腿部定義 '{leg_piece_name}' 但找不到對應檔案。")
-            else:
+            if leg_image_path:
                 print(f"    > 檢測到擴展部件: '{leg_piece_name}'，正在擴展畫布...")
                 leg_img = Image.open(os.path.join(images_dir, leg_image_path)).convert('RGBA')
                 
                 new_width = max(base_img.width, leg_img.width)
                 new_height = base_img.height + leg_img.height
-                canvas = Image.new('RGBA', (new_width, new_height), (0,0,0,0))
                 
-                canvas.paste(base_img, (0,0), base_img)
-                canvas.paste(leg_img, (0, base_img.height), leg_img)
+                # 先建立一個擴展後的全透明畫布
+                expanded_canvas = Image.new('RGBA', (new_width, new_height), (0,0,0,0))
+                
+                # 【升級】使用高精度方法貼上底圖和腿部
+                expanded_canvas = composite_numpy(expanded_canvas, base_img, position=(0, 0))
+                expanded_canvas = composite_numpy(expanded_canvas, leg_img, position=(0, base_img.height))
+                canvas = expanded_canvas
                 print(f"    > 新畫布尺寸: {new_width}x{new_height}")
 
         output_path_base = os.path.join(output_dir, f"{base_spm_name}_base.png")
@@ -93,15 +130,15 @@ def assemble_images_by_rules(spm_filename: str, filenames: List[str], images_dir
 
         for overlay_name in overlays:
             overlay_path = file_lookup.get(overlay_name.lower())
-            if not overlay_path:
-                print(f"    [警告] 找不到配件檔案: '{overlay_name}'")
-                continue
+            if not overlay_path: continue
 
             print(f"    > 正在疊加配件: '{overlay_name}'...")
             with Image.open(os.path.join(images_dir, overlay_path)) as overlay_img:
                 overlay_img = overlay_img.convert('RGBA')
-                temp_canvas = canvas.copy()
-                temp_canvas.paste(overlay_img, (0,0), overlay_img)
+                
+                # 【升級】使用高精度方法疊加配件
+                temp_canvas = composite_numpy(canvas, overlay_img, position=(0,0))
+                
                 overlay_suffix = os.path.splitext(overlay_name)[0].replace(base_spm_name, '')
                 output_path_overlay = os.path.join(output_dir, f"{base_spm_name}{overlay_suffix}.png")
                 temp_canvas.save(output_path_overlay, 'PNG')
@@ -115,7 +152,7 @@ def assemble_images_by_rules(spm_filename: str, filenames: List[str], images_dir
 # --- 主程式 (不變) ---
 def main():
     IMAGES_FOLDER = 'images'; OUTPUT_FOLDER = 'output'
-    print("--- SPM 最終合成腳本 (v23.0 - 正則獵手版) ---")
+    print("--- SPM 最終合成腳本 (v24.0 - 精準引擎版) ---")
 
     if not os.path.isdir(IMAGES_FOLDER):
         print(f"錯誤：找不到圖片來源資料夾 '{IMAGES_FOLDER}'，請建立它。"); return
