@@ -1,4 +1,4 @@
-找了一輪，找到Chenx221大佬寫的(EscudeTools)[https://github.com/Chenx221/EscudeTools]
+找了一輪，找到Chenx221大佬寫的[EscudeTools](https://github.com/Chenx221/EscudeTools)
 
 但對於不懂程序的人，只好全丟ai處理，換成python，經過一輪觀察應該可以了，雖然只能解圖
 
@@ -13,7 +13,7 @@ options:
   -h, --help            show this help message and exit
   -d <bin_dir>          [解包] 將指定目錄下的所有 .bin 檔案轉換為 .db 資料庫。
                                  範例: -d "C:\path\to\your\bin_files"
-  -a <LsfPath>          [通用合成] 強制合成指定目錄下所有LSF檔案(組合全部圖層)。
+  -a <LsfPath>          [通用合成] 強制合成指定目錄下所有LSF檔案(組合全部圖層)。註：所有圖縫合，正常不用
   -ev <EvPath> <db_path>
                         [合成] 合成事件 (EV) 圖片 (檔名會包含CG鑑賞ID)。
   -s <StPath> <db_path>
