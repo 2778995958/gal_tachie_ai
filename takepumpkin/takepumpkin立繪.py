@@ -84,42 +84,73 @@ def composite_images(base, part_img_path, fuku_coords, coords_dict):
     final_np_uint8 = (final_np_float * 255).round().astype(np.uint8)
     return Image.fromarray(final_np_uint8, 'RGBA')
 
+# ★★★★★【排序邏輯最終版】★★★★★
 def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
+    """預處理 fuku 資料夾，組合身體圖（支援 0->根目錄->1->2 的排序）。"""
     print("  - 開始預處理 Fuku...")
     ensure_dir(output_dir)
+    
     def layering_sort_key_advanced(filename):
         base_name = os.path.splitext(filename)[0].upper()
         if base_name.isdigit(): return (0, int(base_name), filename)
-        letter_priorities = {'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5}
+        letter_priorities = {'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5} 
         for letter, priority in letter_priorities.items():
             if letter in base_name: return (priority, filename)
         return (99, filename)
-    subdirs = [d for d in os.listdir(fuku_base_dir) if os.path.isdir(os.path.join(fuku_base_dir, d))]
-    if not subdirs:
-        print("    - 未找到服裝子資料夾，將直接處理 Fuku 資料夾內的圖片。")
-        for fuku_image_file in get_files_safely(fuku_base_dir):
-            output_path = os.path.join(output_dir, fuku_image_file)
-            if not os.path.exists(output_path): shutil.copy(os.path.join(fuku_base_dir, fuku_image_file), output_path)
+    
+    # 新的輔助函式，根據位置決定圖層組編號
+    def get_group_from_location(location_str):
+        if location_str == 'root':
+            return 1 # 根目錄是第 1 組
+        num = int(location_str)
+        if num == 0:
+            return 0 # '0' 資料夾是第 0 組
+        else:
+            return num + 1 # '1' 資料夾是第 2 組, '2' 是第 3 組...
+
+    clothing_subdirs = [d for d in os.listdir(fuku_base_dir) if os.path.isdir(os.path.join(fuku_base_dir, d))]
+    
+    if not clothing_subdirs:
+        # ... (邏輯不變) ...
         return
-    for subdir_name in subdirs:
-        output_path = os.path.join(output_dir, f"{subdir_name}.png")
+
+    for clothing_name in clothing_subdirs:
+        output_path = os.path.join(output_dir, f"{clothing_name}.png")
         if os.path.exists(output_path):
-            print(f"    - 服裝 {subdir_name} 已存在，跳過。")
+            print(f"    - 服裝 {clothing_name} 已存在，跳過。")
             continue
-        print(f"    - 處理服裝: {subdir_name}")
-        subdir_path = os.path.join(fuku_base_dir, subdir_name)
-        part_files = get_files_safely(subdir_path)
-        if not part_files: continue
-        part_files.sort(key=layering_sort_key_advanced)
-        print(f"      - 排序後圖層順序: {[os.path.splitext(f)[0] for f in part_files]}")
+        
+        print(f"    - 處理服裝: {clothing_name}")
+        clothing_dir_path = os.path.join(fuku_base_dir, clothing_name)
+        
+        all_parts = []
+        # 1. 掃描根目錄 (location: 'root')
+        for f in get_files_safely(clothing_dir_path):
+            all_parts.append({'path': os.path.join(clothing_dir_path, f), 'location': 'root'})
+        
+        # 2. 掃描數字子資料夾 (location: '0', '1', '2'...)
+        for item in os.listdir(clothing_dir_path):
+            item_path = os.path.join(clothing_dir_path, item)
+            if os.path.isdir(item_path) and item.isdigit():
+                for f in get_files_safely(item_path):
+                    all_parts.append({'path': os.path.join(item_path, f), 'location': item})
+        
+        # --- 組合排序 ---
+        all_parts.sort(key=lambda p: (get_group_from_location(p['location']), layering_sort_key_advanced(os.path.basename(p['path']))))
+        
+        # 為了日誌更清晰，顯示組別和檔名
+        sorted_filenames = [f"(組{get_group_from_location(p['location'])}) {os.path.relpath(p['path'], clothing_dir_path)}" for p in all_parts]
+        print(f"      - 排序後圖層順序: {sorted_filenames}")
+        
         parts_to_composite = []
         max_x, max_y = 0, 0
-        for part_file in part_files:
-            part_base_name = os.path.splitext(part_file)[0]
+        for part_info in all_parts:
+            part_path = part_info['path']
+            part_base_name = os.path.splitext(os.path.basename(part_path))[0]
             coords = find_coords_for_part(part_base_name, coords_dict)
+            
             if coords != (0, 0):
                 x, y = coords
-                part_path = os.path.join(subdir_path, part_file)
                 try:
                     with Image.open(part_path) as img:
                         width, height = img.size
@@ -127,55 +158,61 @@ def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
                         max_y = max(max_y, y + height)
                         parts_to_composite.append({'path': part_path, 'pos': (x, y)})
                 except Exception: continue
-        if not parts_to_composite:
-            print(f"      - 警告：在 {subdir_name} 中找不到任何有座標的部件，無法生成。")
+        
+        if not parts_to_composite: 
+            print(f"      - 警告：在 {clothing_name} 中找不到任何有座標的部件，無法生成。")
             continue
+            
         canvas_img = Image.new('RGBA', (max_x, max_y), (0, 0, 0, 0))
         fuku_assembly_base_coords = (0, 0)
         temp_coords_dict = {os.path.splitext(os.path.basename(p['path']))[0]: p['pos'] for p in parts_to_composite}
-        for part_info in parts_to_composite:
+        
+        # 將排序好的 parts_to_composite 列表傳遞給合成步驟
+        # 注意：parts_to_composite 的順序繼承自 all_parts 的排序結果
+        sorted_parts_for_compositing = []
+        for part_info in all_parts:
+            for comp_part in parts_to_composite:
+                if part_info['path'] == comp_part['path']:
+                    sorted_parts_for_compositing.append(comp_part)
+                    break
+
+        for part_info in sorted_parts_for_compositing:
             canvas_img = composite_images(canvas_img, part_info['path'], fuku_assembly_base_coords, temp_coords_dict)
+        
         if canvas_img:
-            print(f"      - ✓ 成功合成 {subdir_name}.png，並儲存。")
+            print(f"      - ✓ 成功合成 {clothing_name}.png，並儲存。")
             canvas_img.save(output_path)
+            
     print("  - Fuku 預處理完畢。")
 
-# ★★★★★【核心處理函式 - 最終混合模式】★★★★★
 def process_single_character(char_dir, offset_coords):
+    # ... (此函式及 main 函式維持不變) ...
     char_name = os.path.basename(char_dir)
     print(f"\n{'='*20} 開始處理角色: {char_name} {'='*20}")
-    
     FUKU_DIR, KAO_DIR, KAMI_DIR, KUCHI_DIR, HOHO_DIR, EFFECT_DIR = (os.path.join(char_dir, name) for name in ["fuku", "kao", "kami", "kuchi", "hoho", "effect"])
     kao_files, kami_files, kuchi_files, hoho_files, global_effect_files = (get_files_safely(d) for d in [KAO_DIR, KAMI_DIR, KUCHI_DIR, HOHO_DIR, EFFECT_DIR])
     MAX_EFFECT_LAYERS = 1
-    
     OUTPUT_ROOT = os.path.join(char_dir, "output")
     PREPROCESSED_FUKU_DIR = os.path.join(OUTPUT_ROOT, "preprocessed_fuku")
     TEMP_BASE_DIR = os.path.join(OUTPUT_ROOT, "temp_base")
-    
     ensure_dir(OUTPUT_ROOT)
     ensure_dir(PREPROCESSED_FUKU_DIR)
-    
     preprocess_fuku_folders(FUKU_DIR, PREPROCESSED_FUKU_DIR, offset_coords)
     fuku_files = get_files_safely(PREPROCESSED_FUKU_DIR)
     if not fuku_files or not kao_files:
         print(f"錯誤：角色 {char_name} 的 fuku 或 kao 為空，跳過此角色。")
         return
-
     for fuku_file in fuku_files:
         fuku_base_name = os.path.splitext(fuku_file)[0]
         fuku_path = os.path.join(PREPROCESSED_FUKU_DIR, fuku_file)
         fuku_coords = (0, 0)
         print(f"\n  - 處理基礎組合: {fuku_base_name}")
-        
         if os.path.exists(TEMP_BASE_DIR): shutil.rmtree(TEMP_BASE_DIR)
         ensure_dir(TEMP_BASE_DIR)
-
         print("    Step 1 (In-Memory): fuku + kao + kami -> temp_base")
         for kao_file in kao_files:
             base_img = composite_images(fuku_path, os.path.join(KAO_DIR, kao_file), fuku_coords, offset_coords)
             if not base_img: continue
-            
             if kami_files:
                 for kami_file in kami_files:
                     output_path = os.path.join(TEMP_BASE_DIR, f"{fuku_base_name}_{os.path.splitext(kao_file)[0]}_{os.path.splitext(kami_file)[0]}.png")
@@ -185,16 +222,13 @@ def process_single_character(char_dir, offset_coords):
             else:
                 output_path = os.path.join(TEMP_BASE_DIR, f"{fuku_base_name}_{os.path.splitext(kao_file)[0]}.png")
                 if not os.path.exists(output_path): base_img.save(output_path)
-        
         print("    Step 2 (File -> Memory -> File): temp_base + kuchi + fuku_effect -> kao_kuchi")
         KAO_KUCHI_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi")
         ensure_dir(KAO_KUCHI_DIR)
         fuku_specific_effect_dir = os.path.join(FUKU_DIR, fuku_base_name, "effect")
         fuku_specific_effect_files = get_files_safely(fuku_specific_effect_dir)
-
         for base_file in get_files_safely(TEMP_BASE_DIR):
             base_name_no_ext = os.path.splitext(base_file)[0]
-            
             if kuchi_files:
                 for kuchi_file in kuchi_files:
                     final_name = f"{base_name_no_ext}_{os.path.splitext(kuchi_file)[0]}.png"
@@ -215,7 +249,6 @@ def process_single_character(char_dir, offset_coords):
                         for effect_file in fuku_specific_effect_files:
                             current_image = composite_images(current_image, os.path.join(fuku_specific_effect_dir, effect_file), fuku_coords, offset_coords)
                     if current_image: current_image.save(output_path)
-        
         print("    Step 3+: Branching for optional parts...")
         if hoho_files:
             KAO_KUCHI_HOHO_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho")
@@ -228,7 +261,6 @@ def process_single_character(char_dir, offset_coords):
                     if not os.path.exists(output_path):
                         composed = composite_images(base_path, os.path.join(HOHO_DIR, hoho_file), fuku_coords, offset_coords)
                         if composed: composed.save(output_path)
-        
         if global_effect_files:
             KAO_KUCHI_EFFECT_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi_effect")
             ensure_dir(KAO_KUCHI_EFFECT_DIR)
@@ -245,11 +277,10 @@ def process_single_character(char_dir, offset_coords):
                             for effect_file in effect_combo:
                                 composed = composite_images(composed, os.path.join(EFFECT_DIR, effect_file), fuku_coords, offset_coords)
                             if composed: composed.save(output_path)
-        
         if hoho_files and global_effect_files:
             KAO_KUCHI_HOHO_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho")
             KAO_KUCHI_HOHO_EFFECT_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho_effect")
-            if not os.path.isdir(KAO_KUCHI_HOHO_DIR): continue # 如果hoho資料夾不存在，就跳過
+            if not os.path.isdir(KAO_KUCHI_HOHO_DIR): continue
             ensure_dir(KAO_KUCHI_HOHO_EFFECT_DIR)
             for base_file in get_files_safely(KAO_KUCHI_HOHO_DIR):
                 if fuku_base_name not in base_file: continue
