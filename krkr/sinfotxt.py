@@ -1,8 +1,8 @@
 import os
 
-def convert_sinfo_to_utf8_txt(directory='.', input_encoding='shift_jis'):
+def convert_sinfo_to_utf8_sinfo_txt(directory='.', input_encoding='shift_jis'):
     """
-    將指定目錄下所有 .sinfo 檔案從日文編碼轉換為 UTF-8 編碼的 .txt 檔案。
+    將指定目錄下所有 .sinfo 檔案從日文編碼轉換為 UTF-8 編碼的 .sinfo.txt 檔案。
 
     Args:
         directory (str): 要處理的目錄路徑。預設為當前目錄。
@@ -17,8 +17,9 @@ def convert_sinfo_to_utf8_txt(directory='.', input_encoding='shift_jis'):
     for filename in os.listdir(directory):
         if filename.endswith(".sinfo"):
             sinfo_filepath = os.path.join(directory, filename)
-            txt_filename = os.path.splitext(filename)[0] + ".txt"
-            txt_filepath = os.path.join(directory, txt_filename)
+            # 這裡調整了輸出的副檔名，將 .sinfo 轉換為 .sinfo.txt
+            sinfo_txt_filename = filename + ".txt" 
+            sinfo_txt_filepath = os.path.join(directory, sinfo_txt_filename)
 
             print(f"正在處理檔案: {filename} ...")
             try:
@@ -26,11 +27,11 @@ def convert_sinfo_to_utf8_txt(directory='.', input_encoding='shift_jis'):
                 with open(sinfo_filepath, 'r', encoding=input_encoding, errors='replace') as infile:
                     content = infile.read()
                 
-                # 以 UTF-8 編碼寫入 .txt 檔案
-                with open(txt_filepath, 'w', encoding='utf-8') as outfile:
+                # 以 UTF-8 編碼寫入 .sinfo.txt 檔案
+                with open(sinfo_txt_filepath, 'w', encoding='utf-8') as outfile:
                     outfile.write(content)
                 
-                print(f"成功轉換 {filename} 為 {txt_filename}")
+                print(f"成功轉換 {filename} 為 {sinfo_txt_filename}")
                 converted_count += 1
 
             except UnicodeDecodeError as e:
@@ -52,9 +53,8 @@ def convert_sinfo_to_utf8_txt(directory='.', input_encoding='shift_jis'):
 if __name__ == "__main__":
     # 您可以在這裡指定要處理的目錄。
     # 如果 .sinfo 檔案在腳本同一個目錄下，則不需要更改。
-    # 例如：convert_sinfo_to_utf8_txt(directory='C:/我的資料夾/sinfo檔案')
     
     # 選擇您認為最合適的原始日文編碼，'shift_jis' 或 'cp932'
     # 如果遇到亂碼，可以嘗試更換 input_encoding 的值
-    convert_sinfo_to_utf8_txt(input_encoding='shift_jis') 
-    # 或者嘗試 convert_sinfo_to_utf8_txt(input_encoding='cp932')
+    convert_sinfo_to_utf8_sinfo_txt(input_encoding='shift_jis') 
+    # 或者嘗試 convert_sinfo_to_utf8_sinfo_txt(input_encoding='cp932')
