@@ -26,10 +26,7 @@ def find_exact_folder(base_dir: str, folder_name: str) -> Optional[str]:
     return None
 
 def parse_cglist_into_sections(lines: List[str]) -> Dict[str, List[str]]:
-    """
-    ★★★ 新增函式 ★★★
-    將 cglist.lst 的內容解析成以 [section] 為單位的字典。
-    """
+    """將 cglist.lst 的內容解析成以 [section] 為單位的字典。"""
     sections = {}
     current_section_name = None
     for line in lines:
@@ -39,7 +36,7 @@ def parse_cglist_into_sections(lines: List[str]) -> Dict[str, List[str]]:
         if line.startswith('[') and line.endswith(']'):
             current_section_name = line[1:-1]
             sections[current_section_name] = []
-        elif current_section_name and ',' in line:
+        elif current_section_name:
             sections[current_section_name].append(line)
     return sections
 
@@ -47,7 +44,7 @@ def load_and_prepare_offsets(offset_path: str) -> Dict[str, Tuple[int, int]]:
     """載入 offset.json 並轉換成易於查詢的字典格式。"""
     offsets = {}
     if not os.path.exists(offset_path):
-        print(f"  [警告] 座標檔不存在: {offset_path}")
+        print(f"    [警告] 座標檔不存在: {offset_path}")
         return offsets
     try:
         with open(offset_path, 'r', encoding='utf-8-sig') as f:
@@ -63,7 +60,7 @@ def load_and_prepare_offsets(offset_path: str) -> Dict[str, Tuple[int, int]]:
                     prepared_offsets[key.lower()] = tuple(value[:2])
         return prepared_offsets
     except Exception as e:
-        print(f"  [錯誤] 無法讀取或解析座標檔 {offset_path}: {e}")
+        print(f"    [錯誤] 無法讀取或解析座標檔 {offset_path}: {e}")
         return {}
 
 def composite_images_numpy(
@@ -127,86 +124,115 @@ def process_cglist(file_path: str):
         print(f"  [錯誤] 無法讀取 {file_path}: {e}")
         return
 
-    # ★★★ 關鍵修改 1: 將檔案內容解析成區塊 ★★★
     sections = parse_cglist_into_sections(lines)
     if not sections:
         print("  [警告] 在檔案中沒有找到任何有效的 `[section]` 區塊。")
         return
 
-    # ★★★ 關鍵修改 2: 遍歷每個區塊，而不是整個檔案 ★★★
     for section_name, lines_in_section in sections.items():
         print(f"\n--- 正在處理區塊: [{section_name}] (共 {len(lines_in_section)} 行) ---")
 
-        # ★★★ 關鍵修改 3: 使用 enumerate 來獲取每個區塊內的流水號 (idx) ★★★
         for idx, line in enumerate(lines_in_section):
-            # 流水號從 1 開始
             counter = idx + 1
             formatted_counter = f"{counter:02d}"
 
-            parts = [p.strip() for p in line.split(',')]
-            if len(parts) < 2:
-                continue
-
-            folder_base = parts[0]
-            folder_suffix = parts[1]
-            target_folder_name = folder_base + folder_suffix
-            
             print(f"\n  [行 {idx+1}/{len(lines_in_section)}] 處理: {line} (流水號: {formatted_counter})")
-            
-            image_folder = find_exact_folder(base_dir, target_folder_name)
-            if not image_folder:
-                print(f"    [警告] 找不到資源資料夾 '{target_folder_name}'，跳過此行。")
-                continue
-            
-            offset_path = os.path.join(image_folder, OFFSET_FILENAME)
-            offset_data = load_and_prepare_offsets(offset_path)
-            if not offset_data:
-                print(f"    [警告] 座標檔為空或讀取失敗，跳過此行。")
-                continue
 
-            parts_to_composite = []
-            for part_idx, code in enumerate(parts[1:]):
-                if not code or code == '0' or code == '@':
+            # ★★★ 關鍵修改: 判斷是多圖合成還是單圖處理 ★★★
+            if ',' in line:
+                # --- 多圖合成模式 (有逗號) ---
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) < 2: continue
+
+                folder_base = parts[0]
+                folder_suffix = parts[1]
+                target_folder_name = folder_base + folder_suffix
+                
+                image_folder = find_exact_folder(base_dir, target_folder_name)
+                if not image_folder:
+                    print(f"    [警告] 找不到資源資料夾 '{target_folder_name}'，跳過此行。")
                     continue
                 
-                key_for_filename = f"{part_idx}_{code.lower()}"
-                key_for_offset = f"{part_idx}_{code}" # 保留原始大小寫給 offset
-                filename = f"{key_for_filename}.png"
-                filepath = os.path.join(image_folder, filename)
+                offset_path = os.path.join(image_folder, OFFSET_FILENAME)
+                offset_data = load_and_prepare_offsets(offset_path)
+                if not offset_data:
+                    print(f"    [警告] 座標檔為空或讀取失敗，跳過此行。")
+                    continue
 
-                if os.path.exists(filepath):
+                parts_to_composite = []
+                for part_idx, code in enumerate(parts[1:]):
+                    if not code or code == '0' or code == '@': continue
+                    key_for_filename = f"{part_idx}_{code.lower()}"
+                    key_for_offset = f"{part_idx}_{code}"
+                    filename = f"{key_for_filename}.png"
+                    filepath = os.path.join(image_folder, filename)
+                    if os.path.exists(filepath):
+                        try:
+                            img = Image.open(filepath)
+                            parts_to_composite.append((key_for_offset, img))
+                        except Exception as e:
+                            print(f"    [警告] 無法開啟圖片檔 {filename}: {e}")
+                    else:
+                        print(f"    [警告] 找不到部件檔案: {filename}")
+
+                if not parts_to_composite:
+                    print("    [資訊] 沒有找到任何有效的圖片部件來合成，跳過。")
+                    continue
+                    
+                final_image = composite_images_numpy(parts_to_composite, offset_data)
+                for _, img in parts_to_composite: img.close()
+
+                if final_image:
+                    output_dir = os.path.join(base_dir, OUTPUT_DIR_NAME, section_name)
+                    ensure_dir(output_dir)
+                    
+                    filename_suffix = '_'.join(parts[1:])
+                    output_filename = f"{folder_base}_{formatted_counter}_{filename_suffix}.png"
+                    output_path = os.path.join(output_dir, output_filename)
+                    
                     try:
-                        img = Image.open(filepath)
-                        parts_to_composite.append((key_for_offset, img))
+                        final_image.save(output_path)
+                        print(f"    > √ 合成成功！已儲存至: {os.path.relpath(output_path, base_dir)}")
                     except Exception as e:
-                        print(f"    [警告] 無法開啟圖片檔 {filename}: {e}")
+                        print(f"    > X 儲存失敗: {e}")
                 else:
-                    print(f"    [警告] 找不到部件檔案: {filename}")
+                    print("    > X 合成失敗！")
 
-            if not parts_to_composite:
-                print("    [資訊] 沒有找到任何有效的圖片部件來合成，跳過。")
-                continue
+            else:
+                # --- 單圖處理模式 (無逗號) ---
+                target_folder_name = line
+                image_folder = find_exact_folder(base_dir, target_folder_name)
+                if not image_folder:
+                    print(f"    [警告] 找不到資源資料夾 '{target_folder_name}'，跳過此行。")
+                    continue
+
+                source_filename = f"{target_folder_name}.png"
+                source_filepath = os.path.join(image_folder, source_filename)
+
+                if not os.path.exists(source_filepath):
+                    print(f"    [警告] 在資料夾中找不到源檔案 '{source_filename}'，跳過此行。")
+                    continue
                 
-            final_image = composite_images_numpy(parts_to_composite, offset_data)
-            for _, img in parts_to_composite:
-                img.close()
+                # 建立新的輸出檔名
+                try:
+                    base_name, suffix = line.split('_', 1)
+                    output_filename = f"{base_name}_{formatted_counter}_{suffix}.png"
+                except ValueError:
+                    # 如果檔名中沒有 '_', 提供一個備用方案
+                    print(f"    [警告] 檔名 '{line}' 不符合 'base_suffix' 格式，使用備用命名方式。")
+                    output_filename = f"{line}_{formatted_counter}.png"
 
-            if final_image:
                 output_dir = os.path.join(base_dir, OUTPUT_DIR_NAME, section_name)
                 ensure_dir(output_dir)
-                
-                # ★★★ 關鍵修改 4: 使用新的流水號規則建立檔名 ★★★
-                filename_suffix = '_'.join(parts[1:])
-                output_filename = f"{folder_base}_{formatted_counter}_{filename_suffix}.png"
                 output_path = os.path.join(output_dir, output_filename)
                 
+                # 複製並重新命名檔案
                 try:
-                    final_image.save(output_path)
-                    print(f"    > √ 合成成功！已儲存至: {os.path.relpath(output_path, base_dir)}")
+                    with Image.open(source_filepath) as img:
+                        img.save(output_path)
+                    print(f"    > √ 已處理單張圖片！儲存至: {os.path.relpath(output_path, base_dir)}")
                 except Exception as e:
-                    print(f"    > X 儲存失敗: {e}")
-            else:
-                print("    > X 合成失敗！")
+                    print(f"    > X 處理單張圖片失敗: {e}")
 
 # --- 主程式入口 ---
 def main():
