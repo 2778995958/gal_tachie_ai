@@ -313,7 +313,6 @@ def process_single_character(char_dir, offset_coords):
 
     # --- Step 1: fuku + kao + kami -> temp_base ---
     print("\n  Step 1: fuku + kao + kami -> temp_base")
-    if os.path.exists(TEMP_BASE_DIR): shutil.rmtree(TEMP_BASE_DIR)
     ensure_dir(TEMP_BASE_DIR)
 
     for fuku_file in fuku_files:
