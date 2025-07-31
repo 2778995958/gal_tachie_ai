@@ -48,12 +48,16 @@ def find_coords_for_part(part_base_name, coords_dict):
     return 0, 0
 
 def composite_images(base, part_img_path, fuku_base_image_origin_coords, coords_dict):
+    """
+    使用「預乘 Alpha Blending」工作流程來合成圖片，以消除透明邊緣的灰線問題。
+    """
     try:
         if isinstance(base, str):
             base_img = Image.open(base).convert('RGBA')
         elif isinstance(base, Image.Image):
             base_img = base if base.mode == 'RGBA' else base.convert('RGBA')
-        else: return None
+        else:
+            return None
     except Exception as e:
         print(f"警告：讀取基礎圖片 {base} 時發生錯誤：{e}")
         return None
@@ -64,6 +68,7 @@ def composite_images(base, part_img_path, fuku_base_image_origin_coords, coords_
         
         part_x_original, part_y_original = find_coords_for_part(part_base_name, coords_dict)
         
+        # 核心偏移量計算：部件的原始絕對座標 - fuku 基礎圖的原始絕對座標
         dx = part_x_original - fuku_base_image_origin_coords[0]
         dy = part_y_original - fuku_base_image_origin_coords[1]
         
@@ -71,35 +76,54 @@ def composite_images(base, part_img_path, fuku_base_image_origin_coords, coords_
         print(f"警告：讀取部件圖片 {part_img_path} 或獲取座標時發生錯誤：{e}")
         return None
     
+    # --- 核心合成邏輯：預乘 Alpha Blending ---
+
+    # 1. 將 PIL 影像轉換為 NumPy 浮點數陣列 (0.0-1.0)
     base_np = np.array(base_img, dtype=np.float64) / 255.0
     part_np = np.array(part_img, dtype=np.float64) / 255.0
 
+    # 2. 準備前景圖層 (將部件圖放置在與背景相同大小的畫布上)
     fg_layer = np.zeros_like(base_np)
-
     part_h, part_w = part_np.shape[:2]
     base_h, base_w = base_np.shape[:2]
 
+    # 計算有效的貼上區域，防止部件超出邊界
     x1, y1 = max(dx, 0), max(dy, 0)
     x2, y2 = min(dx + part_w, base_w), min(dy + part_h, base_h)
-
+    
     part_x1, part_y1 = x1 - dx, y1 - dy
     part_x2, part_y2 = x2 - dx, y2 - dy
-
+    
+    # 如果有重疊區域，則將部件像素複製到前景圖層
     if x1 < x2 and y1 < y2:
         fg_layer[y1:y2, x1:x2] = part_np[part_y1:part_y2, part_x1:part_x2]
 
-    bg_rgb, bg_a = base_np[:,:,:3], base_np[:,:,3:4]
-    fg_rgb, fg_a = fg_layer[:,:,:3], fg_layer[:,:,3:4]
+    # 3. 分離 RGBA 色版
+    bg_a = base_np[:, :, 3:4]
+    fg_a = fg_layer[:, :, 3:4]
+    
+    # 4.【關鍵步驟】預乘 Alpha：將 RGB 色版乘以其 Alpha 值
+    bg_rgb_prem = base_np[:, :, :3] * bg_a
+    fg_rgb_prem = fg_layer[:, :, :3] * fg_a
 
+    # 5.【關鍵步驟】混合預乘後的顏色
+    # 公式: C_out = C_fg_prem + C_bg_prem * (1 - a_fg)
+    out_rgb_prem = fg_rgb_prem + bg_rgb_prem * (1.0 - fg_a)
+
+    # 6. 計算輸出的 Alpha 色版 (此公式不變)
+    # 公式: a_out = a_fg + a_bg * (1 - a_fg)
     out_a = fg_a + bg_a * (1.0 - fg_a)
-    out_rgb = np.zeros_like(bg_rgb)
 
-    mask = out_a > 1e-6
-    numerator = fg_rgb * fg_a + bg_rgb * bg_a * (1.0 - fg_a)
-    np.divide(numerator, out_a, where=mask, out=out_rgb)
+    # 7.【關鍵步驟】還原 (Un-premultiply)：將混合後的 RGB 除以新的 Alpha 值
+    # 為了避免除以零，我們只在 Alpha > 0 的地方進行計算
+    out_rgb = np.zeros_like(out_rgb_prem)
+    mask = out_a > 1e-6 # 使用一個極小值來建立遮罩，避免浮點數不精確問題
+    np.divide(out_rgb_prem, out_a, where=mask, out=out_rgb) # 安全地執行除法
 
+    # 8. 將結果合併並轉換回 8-bit (0-255) 圖片格式
     final_np_float = np.concatenate([out_rgb, out_a], axis=2)
-    final_np_uint8 = (final_np_float * 255).round().astype(np.uint8)
+    # 進行四捨五入可以得到更精確的結果，然後才轉換型別
+    final_np_uint8 = (np.clip(final_np_float, 0.0, 1.0) * 255).round().astype(np.uint8)
 
     return Image.fromarray(final_np_uint8, 'RGBA')
 
@@ -109,18 +133,30 @@ def composite_images(base, part_img_path, fuku_base_image_origin_coords, coords_
 
 def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
     """
-    預處理 fuku 資料夾，生成合併或單獨的 fuku 圖片，
-    並在 coords_dict 中記錄這些圖片的實際像素原點在原始大圖座標系中的位置。
+    預處理 fuku 資料夾。此版本已更新，
+    無論是處理單張圖片還是合成資料夾，所有合成操作
+    均統一使用 composite_images 函式，以確保最高的圖像品質並消除灰邊。
     """
     print("  - 開始預處理 Fuku...")
     ensure_dir(output_dir)
     
+    # --- 內部輔助函式 (排序邏輯不變) ---
     def layering_sort_key_advanced(filename):
         base_name = os.path.splitext(filename)[0].upper()
+        # --- 新增修改 ---
+        # 在檢查前，先將檔名中可能的全形字母轉換為半形
+        base_name = base_name.replace('Ａ', 'A').replace('Ｂ', 'B').replace('Ｃ', 'C').replace('Ｄ', 'D').replace('Ｅ', 'E')
+        # --- 修改結束 ---
+
         if base_name.isdigit(): return (0, int(base_name), filename)
+        
         letter_priorities = {'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5}  
         for letter, priority in letter_priorities.items():
-            if letter in base_name: return (priority, filename)
+            if letter in base_name: 
+                # 成功找到優先級，返回 (優先級數字, 檔名)
+                return (priority, filename)
+        
+        # 如果上面都沒找到，則視為普通圖層，給予最低優先級 99
         return (99, filename)
         
     def get_group_from_location(location_str):
@@ -129,14 +165,12 @@ def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
         if num == 0: return 0 
         else: return num + 1 
 
+    # --- 收集所有 Fuku 項目 (邏輯不變) ---
     all_fuku_items = []
-
-    # 1. 收集直接放在 fuku/ 下的單張 png 圖片
     standalone_pngs = get_files_safely(fuku_base_dir)
     for png_file in standalone_pngs:
         all_fuku_items.append({'type': 'single_image', 'path': os.path.join(fuku_base_dir, png_file)})
 
-    # 2. 收集 fuku/ 下的子資料夾
     clothing_subdirs = [d for d in os.listdir(fuku_base_dir) if os.path.isdir(os.path.join(fuku_base_dir, d))]
     for clothing_name in clothing_subdirs:
         all_fuku_items.append({'type': 'folder', 'name': clothing_name, 'path': os.path.join(fuku_base_dir, clothing_name)})
@@ -148,69 +182,53 @@ def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
     print(f"    - 發現 {len(all_fuku_items)} 個 Fuku 項目，開始處理。")
 
     for item in all_fuku_items:
+        # --- 處理單張 Fuku 圖片 (邏輯不變，它只做裁剪，不涉及合成) ---
         if item['type'] == 'single_image':
-            # 處理單張圖片
             fuku_path = item['path']
             fuku_file = os.path.basename(fuku_path)
             fuku_base_name = os.path.splitext(fuku_file)[0]
             output_path = os.path.join(output_dir, fuku_file)
 
-            # 獲取單張 fuku 的原始絕對座標
             original_fuku_coords = find_coords_for_part(fuku_base_name, coords_dict)
             
             if os.path.exists(output_path):
                 print(f"    - 單張服裝 {fuku_base_name} 已存在，跳過。")
-                # 即使跳過，也要確保 coords_dict 中有其正確的原始座標
                 if fuku_base_name not in coords_dict:
                     coords_dict[fuku_base_name] = original_fuku_coords
                 continue
 
             try:
                 img = Image.open(fuku_path).convert('RGBA')
-                
-                # --- 新增邏輯：裁切多餘空白並計算新原點 ---
-                # 找到圖片的實際內容邊界
                 bbox = img.getbbox() 
                 
-                if bbox: # 如果圖片不是完全透明的
-                    # 裁剪圖片到實際內容大小
+                if bbox:
                     cropped_img = img.crop(bbox)
-                    
-                    # 計算裁剪後圖片的 (0,0) 像素在原始大圖座標系中的新位置
-                    # 原始 fuku 的 (0,0) 在原始大圖是 original_fuku_coords
-                    # 裁剪框的左上角 (bbox[0], bbox[1]) 在原始 fuku 中
-                    # 所以裁剪後圖片的 (0,0) 在原始大圖中是 original_fuku_coords + (bbox[0], bbox[1])
                     new_fuku_origin_x = original_fuku_coords[0] + bbox[0]
                     new_fuku_origin_y = original_fuku_coords[1] + bbox[1]
-
                     cropped_img.save(output_path)
                     print(f"    - ✓ 成功預處理單張服裝 {fuku_base_name}.png (裁剪後，實際原點: ({new_fuku_origin_x}, {new_fuku_origin_y}))。")
-                    
-                    # 將裁剪後的實際原點存回 coords_dict
                     coords_dict[fuku_base_name] = (new_fuku_origin_x, new_fuku_origin_y)
-                else: # 圖片是完全透明的
-                    print(f"    - 警告：單張服裝 {fuku_base_name}.png 為空或完全透明，將複製為透明圖片。其原點將為 {original_fuku_coords}。")
-                    # 即使是透明圖片，也按原始座標記錄，讓其他部件可以正確對齊到一個「空」的位置
+                else:
+                    print(f"    - 警告：單張服裝 {fuku_base_name}.png 為空，將複製透明圖。其原點為 {original_fuku_coords}。")
                     img.save(output_path)
-                    coords_dict[fuku_base_name] = original_fuku_coords # 保持原始座標，因為沒有裁剪
-
+                    coords_dict[fuku_base_name] = original_fuku_coords
             except Exception as e:
                 print(f"    - 警告：處理單張服裝 {fuku_base_name}.png 時發生錯誤：{e}，已跳過。")
                 continue
 
+        # --- 【核心修改】處理 Fuku 資料夾 ---
         elif item['type'] == 'folder':
-            # 處理資料夾 (這部分邏輯保持不變，因為它已經正確地裁剪了空白並記錄了原點)
             clothing_name = item['name']
             output_path = os.path.join(output_dir, f"{clothing_name}.png")
 
             if os.path.exists(output_path):
                 print(f"    - 服裝 {clothing_name} 已存在，跳過。")
-                # 如果已經存在，我們假設它的偏移量之前已經被計算並儲存了
                 continue
 
             print(f"    - 處理服裝資料夾: {clothing_name}")
             clothing_dir_path = item['path']
             
+            # 1. 收集並排序所有部件圖層 (邏輯不變)
             all_parts = []
             for f in get_files_safely(clothing_dir_path):
                 all_parts.append({'path': os.path.join(clothing_dir_path, f), 'location': 'root'})
@@ -226,6 +244,7 @@ def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
             sorted_filenames = [f"(組{get_group_from_location(p['location'])}) {os.path.relpath(p['path'], clothing_dir_path)}" for p in all_parts]
             print(f"      - 排序後圖層順序: {sorted_filenames}")
             
+            # 2. 計算所有部件構成的整體邊界，以確定最終畫布大小
             parts_for_canvas_calc = []
             min_x, min_y = float('inf'), float('inf')
             max_x, max_y = float('-inf'), float('-inf')
@@ -252,27 +271,39 @@ def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
                 print(f"      - 警告：在 {clothing_name} 中找不到任何有效部件或無法讀取，無法生成。")
                 continue
 
+            # 3. 【全新合成流程】
             canvas_width = max_x - min_x
             canvas_height = max_y - min_y
             
+            # 建立一個初始的、完全透明的畫布作為合成底圖
             canvas_img = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
             
+            # 這個新畫布的原點(0,0)在全局座標系中的位置是(min_x, min_y)
+            canvas_origin_coords = (min_x, min_y)
+            
+            # 逐層呼叫 composite_images 進行高品質合成
             for part_info in all_parts:
-                found_part_data = next((p for p in parts_for_canvas_calc if p['path'] == part_info['path']), None)
-                if found_part_data:
-                    adjusted_pos_x = found_part_data['original_pos'][0] - min_x
-                    adjusted_pos_y = found_part_data['original_pos'][1] - min_y
-                    
-                    try:
-                        part_img = Image.open(found_part_data['path']).convert('RGBA')
-                        canvas_img.paste(part_img, (adjusted_pos_x, adjusted_pos_y), part_img)
-                    except Exception as e:
-                        print(f"      - 警告：貼圖部件 {found_part_data['path']} 時發生錯誤：{e}")
+                part_path = part_info['path']
+                
+                # 將當前部件疊加到已合成的 canvas_img 上
+                updated_canvas = composite_images(
+                    base=canvas_img, 
+                    part_img_path=part_path, 
+                    fuku_base_image_origin_coords=canvas_origin_coords, 
+                    coords_dict=coords_dict
+                )
+                
+                if updated_canvas:
+                    canvas_img = updated_canvas # 更新畫布為剛合成完的結果
+                else:
+                    print(f"      - 警告：在預處理 {clothing_name} 時合成 {os.path.basename(part_path)} 失敗，已跳過此圖層。")
 
+            # 4. 儲存最終結果
             if canvas_img:
                 canvas_img.save(output_path)
-                print(f"      - ✓ 成功合成 {clothing_name}.png，並儲存。")
-                coords_dict[clothing_name] = (min_x, min_y)
+                print(f"      - ✓ 成功使用統一邏輯合成 {clothing_name}.png，並儲存。")
+                # 儲存這個合成品的原點座標
+                coords_dict[clothing_name] = canvas_origin_coords
             else:
                 print(f"      - 錯誤：合成 {clothing_name}.png 失敗。")
                 
