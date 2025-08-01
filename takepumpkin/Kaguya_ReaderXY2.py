@@ -266,7 +266,7 @@ def main():
 
     if master_coords_list:
         # --- 3. 將 CSV 檔案的路徑也設定在腳本目錄下 ---
-        csv_path = os.path.join(script_dir, "master_coordinates.csv")
+        csv_path = os.path.join(script_dir, "Kaguya_XY_Offset.csv")
         try:
             fieldnames = ['source_file', 'frame', 'x', 'y', 'width', 'height', 'bpp']
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
