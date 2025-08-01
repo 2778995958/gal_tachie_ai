@@ -1,4 +1,5 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
 import shutil
 from PIL import Image, ImageChops # 導入 ImageChops 用於裁剪
 import itertools
@@ -360,6 +361,192 @@ def preprocess_fuku_folders(fuku_base_dir, output_dir, coords_dict):
 ## **單一角色處理邏輯 (保留所有循環和輸出路徑)**
 ## ---
 
+def process_fuku_task(fuku_file, char_name, all_dirs, all_files, offset_coords):
+    """
+    單一線程執行的任務：處理一套 fuku 的所有組合。
+    """
+    # 從傳入的參數中解包路徑和檔案列表
+    FUKU_DIR, KAO_DIR, KAMI_DIR, KUCHI_DIR, HOHO_DIR, EFFECT_DIR = all_dirs['fuku'], all_dirs['kao'], all_dirs['kami'], all_dirs['kuchi'], all_dirs['hoho'], all_dirs['effect']
+    OUTPUT_ROOT, PREPROCESSED_FUKU_DIR, TEMP_BASE_DIR = all_dirs['output'], all_dirs['preprocessed_fuku'], all_dirs['temp_base']
+    
+    kao_files, kami_files, kuchi_files, hoho_files, global_effect_files = all_files['kao'], all_files['kami'], all_files['kuchi'], all_files['hoho'], all_files['effect']
+    
+    # --- 以下是從舊的 for 迴圈中移過來的邏輯 ---
+    
+    fuku_base_name = get_base_key_from_filename(fuku_file)
+    fuku_path = os.path.join(PREPROCESSED_FUKU_DIR, fuku_file)
+    fuku_actual_origin_coords = find_coords_for_part(fuku_base_name, offset_coords)
+    print(f"    - [線程處理中] 基礎組合: {fuku_base_name} (原點: {fuku_actual_origin_coords})")
+
+    # Step 1: fuku + kao + kami -> temp_base
+    for kao_file in kao_files:
+        kao_base_key = get_base_key_from_filename(kao_file)
+        output_filename_base = f"{char_name}_{fuku_base_name}_{kao_base_key}"
+        base_img_for_kami = composite_images(fuku_path, os.path.join(KAO_DIR, kao_file), fuku_actual_origin_coords, offset_coords)
+        if not base_img_for_kami: continue
+        
+        final_base_output_name = f"{output_filename_base}.png"
+        output_path_temp = os.path.join(TEMP_BASE_DIR, final_base_output_name)
+        if not os.path.exists(output_path_temp):
+            final_image_to_save = None
+            if kami_files:
+                # 您的邏輯：只使用第一個 kami
+                default_kami_file = kami_files[0]
+                final_image_to_save = composite_images(base_img_for_kami.copy(), os.path.join(KAMI_DIR, default_kami_file), fuku_actual_origin_coords, offset_coords)
+            else:
+                final_image_to_save = base_img_for_kami
+            if final_image_to_save:
+                final_image_to_save.save(output_path_temp)
+                # print(f"      ✓ {fuku_base_name}: 生成 {final_base_output_name}") # 輸出訊息可以簡化
+
+    # Step 2: temp_base + kuchi + fuku_specific_effect -> kao_kuchi
+    KAO_KUCHI_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi")
+    ensure_dir(KAO_KUCHI_DIR)
+    fuku_specific_effect_dir = os.path.join(FUKU_DIR, fuku_base_name, "effect")
+    fuku_specific_effect_files = get_files_safely(fuku_specific_effect_dir)
+    temp_base_files_for_fuku = [f for f in get_files_safely(TEMP_BASE_DIR) if f"_{fuku_base_name}_" in f]
+
+    for base_file in temp_base_files_for_fuku:
+        base_name_no_ext = os.path.splitext(base_file)[0]
+        base_path = os.path.join(TEMP_BASE_DIR, base_file)
+        if kuchi_files:
+            for kuchi_file in kuchi_files:
+                kuchi_base_key = get_base_key_from_filename(kuchi_file)
+                final_name = f"{base_name_no_ext}_{kuchi_base_key}.png"
+                output_path_kuchi = os.path.join(KAO_KUCHI_DIR, final_name)
+                if not os.path.exists(output_path_kuchi):
+                    current_image = composite_images(base_path, os.path.join(KUCHI_DIR, kuchi_file), fuku_actual_origin_coords, offset_coords)
+                    if not current_image: continue
+                    if fuku_specific_effect_files:
+                        for effect_file in fuku_specific_effect_files:
+                            current_image = composite_images(current_image.copy(), os.path.join(fuku_specific_effect_dir, effect_file), fuku_actual_origin_coords, offset_coords)
+                            if not current_image: break
+                    if current_image: current_image.save(output_path_kuchi)
+        else:
+            final_name = f"{base_name_no_ext}.png"
+            output_path_kuchi = os.path.join(KAO_KUCHI_DIR, final_name)
+            if not os.path.exists(output_path_kuchi):
+                current_image = Image.open(base_path).convert('RGBA')
+                if fuku_specific_effect_files:
+                    for effect_file in fuku_specific_effect_files:
+                        current_image = composite_images(current_image.copy(), os.path.join(fuku_specific_effect_dir, effect_file), fuku_actual_origin_coords, offset_coords)
+                        if not current_image: break
+                if current_image: current_image.save(output_path_kuchi)
+    
+    # Step 3 & 4 ... (hoho 和 effect 的處理邏輯)
+    # 為了簡潔，這裡省略貼上重複的程式碼，它們的邏輯和上面類似
+    # 您需要將原有的 Step 3 和 Step 4 的迴圈邏輯也複製到這個函式裡
+    # 注意：在處理 Step 3 和 4 時，您需要從 KAO_KUCHI_DIR 讀取檔案
+    # 這裡我為您補全 Step 3 & 4
+    
+    # --- Step 3: kao_kuchi + hoho -> kao_kuchi_hoho ---
+    if hoho_files:
+        KAO_KUCHI_HOHO_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho")
+        ensure_dir(KAO_KUCHI_HOHO_DIR)
+        kao_kuchi_files_for_fuku = [f for f in get_files_safely(KAO_KUCHI_DIR) if f"_{fuku_base_name}_" in f]
+        for base_file in kao_kuchi_files_for_fuku:
+            base_name_no_ext = os.path.splitext(base_file)[0]
+            base_path = os.path.join(KAO_KUCHI_DIR, base_file)
+            for hoho_file in hoho_files:
+                hoho_base_key = get_base_key_from_filename(hoho_file)
+                final_name = f"{base_name_no_ext}_{hoho_base_key}.png"
+                output_path_hoho = os.path.join(KAO_KUCHI_HOHO_DIR, final_name)
+                if not os.path.exists(output_path_hoho):
+                    composed = composite_images(base_path, os.path.join(HOHO_DIR, hoho_file), fuku_actual_origin_coords, offset_coords)
+                    if composed: composed.save(output_path_hoho)
+                        
+    # --- Step 4: 合成 Global Effect ---
+    MAX_EFFECT_LAYERS = 1
+    if global_effect_files:
+        input_dirs_for_effect = []
+        if hoho_files: input_dirs_for_effect.append(os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho"))
+        input_dirs_for_effect.append(os.path.join(OUTPUT_ROOT, "kao_kuchi"))
+        
+        for input_dir in input_dirs_for_effect:
+            if not os.path.isdir(input_dir): continue
+            
+            output_dir = f"{input_dir}_effect"
+            ensure_dir(output_dir)
+            
+            base_files_for_fuku_effect = [f for f in get_files_safely(input_dir) if f"_{fuku_base_name}_" in f]
+            for base_file in base_files_for_fuku_effect:
+                base_name_no_ext = os.path.splitext(base_file)[0]
+                base_path = os.path.join(input_dir, base_file)
+                for size in range(1, MAX_EFFECT_LAYERS + 1):
+                    if len(global_effect_files) < size: continue
+                    for effect_combo in itertools.combinations(global_effect_files, size):
+                        combo_suffix = "_".join(sorted([get_base_key_from_filename(f) for f in effect_combo]))
+                        final_name = f"{base_name_no_ext}_{combo_suffix}.png"
+                        output_path_effect = os.path.join(output_dir, final_name)
+                        if not os.path.exists(output_path_effect):
+                            composed = Image.open(base_path).convert('RGBA')
+                            for effect_file in effect_combo:
+                                composed = composite_images(composed, os.path.join(EFFECT_DIR, effect_file), fuku_actual_origin_coords, offset_coords)
+                                if not composed: break
+                            if composed: composed.save(output_path_effect)
+    
+    # print(f"    ✓ [線程完成] {fuku_base_name}")
+
+def process_single_character(char_dir, offset_coords):
+    char_name = os.path.basename(char_dir)
+    print(f"\n{'='*20} 開始處理角色: {char_name} {'='*20}")
+    
+    # --- 1. 準備所有路徑和檔案列表 (這部分不變) ---
+    FUKU_DIR, KAO_DIR, KAMI_DIR, KUCHI_DIR, HOHO_DIR, EFFECT_DIR = (os.path.join(char_dir, name) for name in ["fuku", "kao", "kami", "kuchi", "hoho", "effect"])
+    OUTPUT_ROOT = os.path.join(char_dir, "output")
+    PREPROCESSED_FUKU_DIR = os.path.join(OUTPUT_ROOT, "preprocessed_fuku")
+    TEMP_BASE_DIR = os.path.join(OUTPUT_ROOT, "temp_base")
+
+    all_dirs = {
+        'fuku': FUKU_DIR, 'kao': KAO_DIR, 'kami': KAMI_DIR, 'kuchi': KUCHI_DIR, 'hoho': HOHO_DIR, 'effect': EFFECT_DIR,
+        'output': OUTPUT_ROOT, 'preprocessed_fuku': PREPROCESSED_FUKU_DIR, 'temp_base': TEMP_BASE_DIR
+    }
+
+    ensure_dir(OUTPUT_ROOT)
+    ensure_dir(PREPROCESSED_FUKU_DIR)
+    ensure_dir(TEMP_BASE_DIR)
+
+    kao_files = get_files_safely(KAO_DIR)
+    kami_files = get_files_safely(KAMI_DIR)
+    kuchi_files = get_files_safely(KUCHI_DIR)
+    hoho_files = get_files_safely(HOHO_DIR)
+    global_effect_files = get_files_safely(EFFECT_DIR)
+
+    all_files = {'kao': kao_files, 'kami': kami_files, 'kuchi': kuchi_files, 'hoho': hoho_files, 'effect': global_effect_files}
+
+    # --- 2. 預處理 Fuku (這一步仍然需要同步執行) ---
+    preprocess_fuku_folders(FUKU_DIR, PREPROCESSED_FUKU_DIR, offset_coords)
+    fuku_files = get_files_safely(PREPROCESSED_FUKU_DIR)
+    
+    if not fuku_files or not kao_files:
+        print(f"  - 錯誤：角色 {char_name} 的 fuku 或 kao 列表為空，無法繼續組合，已跳過。")
+        return
+
+    # --- 3. 【核心修改】使用線程池並行處理所有 fuku 任務 ---
+    # 使用 os.cpu_count() 來決定最大線程數，通常是最佳選擇
+    # 如果 os.cpu_count() 返回 None，則預設為 4
+    max_worker_threads = os.cpu_count() or 4
+    print(f"\n  - 初始化線程池，最大線程數: {max_worker_threads}")
+    print(f"  - 開始對 {len(fuku_files)} 套 fuku 進行並行處理...")
+
+    with ThreadPoolExecutor(max_workers=max_worker_threads) as executor:
+        # 提交所有任務
+        futures = [executor.submit(process_fuku_task, fuku_file, char_name, all_dirs, all_files, offset_coords) for fuku_file in fuku_files]
+        
+        # 等待所有線程執行完畢
+        for future in futures:
+            try:
+                # .result() 會等待線程結束，如果線程中發生錯誤，這裡會拋出異常
+                future.result()
+            except Exception as e:
+                print(f"  -! 一個線程在執行時發生嚴重錯誤: {e}")
+
+    print(f"\n--- ✓ 角色 {char_name} 所有 fuku 組合均已處理完畢 ---")
+
+## ---
+## **主程式入口**
+## ---
+
 def get_base_key_from_filename(filename):
     """
     從完整檔名中獲取移除了影格後綴的核心基礎名稱。
@@ -376,233 +563,6 @@ def get_base_key_from_filename(filename):
     else:
         # 如果沒有影格後綴，直接返回原始的、無副檔名的名稱
         return base_name_no_ext
-
-def process_single_character(char_dir, offset_coords):
-    char_name = os.path.basename(char_dir)
-    print(f"\n{'='*20} 開始處理角色: {char_name} {'='*20}")
-    FUKU_DIR, KAO_DIR, KAMI_DIR, KUCHI_DIR, HOHO_DIR, EFFECT_DIR = (os.path.join(char_dir, name) for name in ["fuku", "kao", "kami", "kuchi", "hoho", "effect"])
-    
-    kao_files = get_files_safely(KAO_DIR)
-    kami_files = get_files_safely(KAMI_DIR)
-    kuchi_files = get_files_safely(KUCHI_DIR)
-    hoho_files = get_files_safely(HOHO_DIR)
-    global_effect_files = get_files_safely(EFFECT_DIR)
-
-    MAX_EFFECT_LAYERS = 1
-    
-    OUTPUT_ROOT = os.path.join(char_dir, "output")
-    PREPROCESSED_FUKU_DIR = os.path.join(OUTPUT_ROOT, "preprocessed_fuku")
-    TEMP_BASE_DIR = os.path.join(OUTPUT_ROOT, "temp_base")
-
-    ensure_dir(OUTPUT_ROOT)
-    ensure_dir(PREPROCESSED_FUKU_DIR)
-    
-    preprocess_fuku_folders(FUKU_DIR, PREPROCESSED_FUKU_DIR, offset_coords)
-    
-    fuku_files = get_files_safely(PREPROCESSED_FUKU_DIR)
-    
-    print(f"  - 檔案檢查：找到 {len(fuku_files)} 個已處理的 fuku 檔案，{len(kao_files)} 個 kao 檔案。")
-    if not fuku_files or not kao_files:
-        print(f"  - 錯誤：角色 {char_name} 的 fuku 或 kao 列表為空，無法繼續組合，已跳過。")
-        return
-
-    # --- Step 1: fuku + kao + kami -> temp_base ---
-    print("\n  Step 1: fuku + kao + kami -> temp_base")
-    ensure_dir(TEMP_BASE_DIR)
-
-    for fuku_file in fuku_files:
-        fuku_base_name = get_base_key_from_filename(fuku_file) # 使用新函式
-        fuku_path = os.path.join(PREPROCESSED_FUKU_DIR, fuku_file)
-        
-        fuku_actual_origin_coords = find_coords_for_part(fuku_base_name, offset_coords) 
-        print(f"    - 處理基礎組合: {fuku_base_name} (fuku圖片的實際原點: {fuku_actual_origin_coords})")
-
-        for kao_file in kao_files:
-            # 【修改點】使用新函式獲取乾淨的 kao 名稱
-            kao_base_key = get_base_key_from_filename(kao_file)
-            output_filename_base = f"{char_name}_{fuku_base_name}_{kao_base_key}"
-            
-            base_img_for_kami = composite_images(fuku_path, os.path.join(KAO_DIR, kao_file), 
-                                                 fuku_actual_origin_coords, offset_coords)
-            
-            if not base_img_for_kami: continue
-
-            if kami_files:
-                for kami_file in kami_files:
-                    # 【修改點】使用新函式獲取乾淨的 kami 名稱
-                    kami_base_key = get_base_key_from_filename(kami_file)
-                    final_base_output_name = f"{output_filename_base}.png"
-                    output_path_temp = os.path.join(TEMP_BASE_DIR, final_base_output_name)
-                    
-                    if not os.path.exists(output_path_temp):
-                        composed = composite_images(base_img_for_kami.copy(), os.path.join(KAMI_DIR, kami_file), 
-                                                    fuku_actual_origin_coords, offset_coords)
-                        if composed: 
-                            composed.save(output_path_temp)
-                            print(f"      ✓ 生成 {final_base_output_name}")
-            else:
-                final_base_output_name = f"{output_filename_base}.png"
-                output_path_temp = os.path.join(TEMP_BASE_DIR, final_base_output_name)
-                if not os.path.exists(output_path_temp):
-                    base_img_for_kami.save(output_path_temp)
-                    print(f"      ✓ 生成 {final_base_output_name} (無kami)")
-
-
-    # --- Step 2: 從 temp_base 讀取，合成 kuchi 和 fuku_specific_effect ---
-    print("\n  Step 2: temp_base + kuchi + fuku_specific_effect -> kao_kuchi")
-    KAO_KUCHI_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi")
-    ensure_dir(KAO_KUCHI_DIR)
-
-    for fuku_file in fuku_files:
-        fuku_base_name = get_base_key_from_filename(fuku_file) # 使用新函式
-        fuku_actual_origin_coords = find_coords_for_part(fuku_base_name, offset_coords)
-        fuku_specific_effect_dir = os.path.join(FUKU_DIR, fuku_base_name, "effect")
-        fuku_specific_effect_files = get_files_safely(fuku_specific_effect_dir)
-        
-        temp_base_files_for_fuku = [f for f in get_files_safely(TEMP_BASE_DIR) if f"_{fuku_base_name}_" in f]
-
-        for base_file in temp_base_files_for_fuku:
-            base_name_no_ext = os.path.splitext(base_file)[0]
-            base_path = os.path.join(TEMP_BASE_DIR, base_file)
-
-            if kuchi_files:
-                for kuchi_file in kuchi_files:
-                    # 【修改點】使用新函式獲取乾淨的 kuchi 名稱
-                    kuchi_base_key = get_base_key_from_filename(kuchi_file)
-                    final_name = f"{base_name_no_ext}_{kuchi_base_key}.png"
-                    output_path_kuchi = os.path.join(KAO_KUCHI_DIR, final_name)
-                    
-                    if not os.path.exists(output_path_kuchi):
-                        current_image = composite_images(base_path, os.path.join(KUCHI_DIR, kuchi_file), 
-                                                         fuku_actual_origin_coords, offset_coords)
-                        
-                        if not current_image: continue
-
-                        if fuku_specific_effect_files:
-                            for effect_file in fuku_specific_effect_files:
-                                current_image = composite_images(current_image.copy(), os.path.join(fuku_specific_effect_dir, effect_file), 
-                                                                 fuku_actual_origin_coords, offset_coords)
-                                if not current_image: break
-                        
-                        if current_image: 
-                            current_image.save(output_path_kuchi)
-                            print(f"      ✓ 生成 {final_name}")
-            else: # 無 kuchi 檔案的情況
-                final_name = f"{base_name_no_ext}.png"
-                output_path_kuchi = os.path.join(KAO_KUCHI_DIR, final_name)
-                
-                if not os.path.exists(output_path_kuchi):
-                    current_image = Image.open(base_path).convert('RGBA')
-                    
-                    if fuku_specific_effect_files:
-                        for effect_file in fuku_specific_effect_files:
-                            current_image = composite_images(current_image.copy(), os.path.join(fuku_specific_effect_dir, effect_file), 
-                                                             fuku_actual_origin_coords, offset_coords)
-                            if not current_image: break
-                    
-                    if current_image: 
-                        current_image.save(output_path_kuchi)
-                        print(f"      ✓ 生成 {final_name}" + (" (有fuku_effect)" if fuku_specific_effect_files else " (無fuku_effect)"))
-
-    # --- Step 3: 從 kao_kuchi 讀取，合成 hoho ---
-    print("\n  Step 3: kao_kuchi + hoho -> kao_kuchi_hoho")
-    if hoho_files:
-        KAO_KUCHI_HOHO_DIR = os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho")
-        ensure_dir(KAO_KUCHI_HOHO_DIR)
-        
-        for fuku_file in fuku_files:
-            fuku_base_name = get_base_key_from_filename(fuku_file) # 使用新函式
-            fuku_actual_origin_coords = find_coords_for_part(fuku_base_name, offset_coords)
-            
-            kao_kuchi_files_for_fuku = [f for f in get_files_safely(KAO_KUCHI_DIR) if f"_{fuku_base_name}_" in f]
-
-            for base_file in kao_kuchi_files_for_fuku:
-                base_name_no_ext = os.path.splitext(base_file)[0]
-                base_path = os.path.join(KAO_KUCHI_DIR, base_file)
-                
-                for hoho_file in hoho_files:
-                    # 【修改點】使用新函式獲取乾淨的 hoho 名稱
-                    hoho_base_key = get_base_key_from_filename(hoho_file)
-                    final_name = f"{base_name_no_ext}_{hoho_base_key}.png"
-                    output_path_hoho = os.path.join(KAO_KUCHI_HOHO_DIR, final_name)
-                    
-                    if not os.path.exists(output_path_hoho):
-                        composed = composite_images(base_path, os.path.join(HOHO_DIR, hoho_file), 
-                                                    fuku_actual_origin_coords, offset_coords)
-                        if composed: 
-                            composed.save(output_path_hoho)
-                            print(f"      ✓ 生成 {final_name}")
-    else:
-        print("  - 無 hoho 檔案，跳過 Step 3。")
-
-    # --- Step 4: 從 kao_kuchi_hoho 或 kao_kuchi 讀取，合成 global_effect ---
-    print("\n  Step 4: 合成 Global Effect")
-    
-    input_dirs_to_process = []
-    
-    if hoho_files:
-        input_dirs_to_process.append({
-            'input': os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho"),
-            'output': os.path.join(OUTPUT_ROOT, "kao_kuchi_hoho_effect")
-        })
-    
-    input_dirs_to_process.append({
-        'input': os.path.join(OUTPUT_ROOT, "kao_kuchi"),
-        'output': os.path.join(OUTPUT_ROOT, "kao_kuchi_effect")
-    })
-
-    if not global_effect_files:
-        print("  - 無 global_effect 檔案，跳過 Step 4。")
-        print(f"--- ✓ 角色 {char_name} 處理完畢 ---") # 提早結束時也顯示處理完畢
-        return
-
-    for dir_pair in input_dirs_to_process:
-        current_input_dir = dir_pair['input']
-        current_output_dir = dir_pair['output']
-
-        if not os.path.isdir(current_input_dir):
-            print(f"    - 輸入目錄 '{os.path.basename(current_input_dir)}' 不存在，跳過。")
-            continue
-        
-        ensure_dir(current_output_dir)
-        print(f"  - 處理特效疊加: {os.path.basename(current_input_dir)} -> {os.path.basename(current_output_dir)}")
-
-        for fuku_file in fuku_files:
-            fuku_base_name = get_base_key_from_filename(fuku_file) # 使用新函式
-            fuku_actual_origin_coords = find_coords_for_part(fuku_base_name, offset_coords)
-            
-            base_files_for_fuku = [f for f in get_files_safely(current_input_dir) if f"_{fuku_base_name}_" in f]
-
-            for base_file in base_files_for_fuku:
-                base_name_no_ext = os.path.splitext(base_file)[0]
-                base_path = os.path.join(current_input_dir, base_file)
-
-                for size in range(1, MAX_EFFECT_LAYERS + 1):
-                    if len(global_effect_files) < size: continue
-                    
-                    for effect_combo in itertools.combinations(global_effect_files, size):
-                        # 【修改點】使用新函式獲取乾淨的 effect 名稱
-                        combo_suffix = "_".join(sorted([get_base_key_from_filename(f) for f in effect_combo]))
-                        final_name = f"{base_name_no_ext}_{combo_suffix}.png"
-                        output_path_effect = os.path.join(current_output_dir, final_name)
-                        
-                        if not os.path.exists(output_path_effect):
-                            composed = Image.open(base_path).convert('RGBA')
-                            
-                            for effect_file in effect_combo:
-                                composed = composite_images(composed, os.path.join(EFFECT_DIR, effect_file), 
-                                                            fuku_actual_origin_coords, offset_coords)
-                                if not composed: break
-                            
-                            if composed: 
-                                composed.save(output_path_effect)
-                                print(f"      ✓ 生成 {final_name}")
-                                
-    print(f"--- ✓ 角色 {char_name} 處理完畢 ---")
-
-## ---
-## **主程式入口**
-## ---
 
 def main():
     script_dir = os.getcwd()
