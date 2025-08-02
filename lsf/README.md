@@ -1,11 +1,11 @@
-```
-還回基本fuku kao循環...
+
+還回基本fuku kao循環...不過要用csv2
 
 以下只能用在只有身體表情，有配件就沒用了
 
 草，有些拆不了bin，這邊再加2個來合立繪
 
-escude_tools_2.py
+lsf_to_csv2.py
 
 escude_combine_images.py
 
@@ -20,4 +20,3 @@ escude_combine_images.py
 裡面lsf是有坐標的，理論上也可以叫ai把隔壁的循環把分析坐標改過去，這樣懶得打sinfo
 
 不過算了，做也做了，sinfo確實方便，但太多服裝不好用，我還是想懶一點
-```
