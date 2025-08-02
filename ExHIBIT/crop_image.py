@@ -2,31 +2,24 @@ from PIL import Image
 import os
 import glob
 
-def process_and_save_image(image_path, num_divisions, main_output_dir): # <--- 修改：增加一個參數
+# 這個函式本身不需要任何修改，因為它的設計已經足夠靈活
+def process_and_save_image(image_path, num_divisions, main_output_dir):
     """
     將單一圖片進行水平裁切，並儲存到指定的主輸出資料夾中。
-
-    :param image_path: 來源圖片的完整路徑
-    :param num_divisions: 要裁切成的等份數量
-    :param main_output_dir: 統一存放結果的主資料夾名稱 (例如 'cropped')
     """
     try:
         base_name = os.path.splitext(os.path.basename(image_path))[0]
         
-        # --- ✨ 主要修改處 ✨ ---
-        # 建立一個以原檔名命名的子資料夾，但路徑是在主輸出資料夾底下
-        # 例如，路徑會變成 'cropped/00040000F'
         output_folder = os.path.join(main_output_dir, base_name)
 
-        # 檢查子資料夾是否存在，不存在才建立
-        # 注意：這裡我們假設主資料夾 'cropped' 已經在主程式區塊被建立了
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
-            print(f"--- 已在 '{main_output_dir}' 中建立資料夾: {base_name} ---")
 
         img = Image.open(image_path)
         width, height = img.size
-        print(f"處理中: {image_path} (尺寸: {width}x{height}, 模式: {img.mode})")
+        
+        # 為了避免重複輸出處理訊息，將其移到主迴圈中
+        # print(f"處理中: {image_path} ...") 
 
         crop_width = width // num_divisions
 
@@ -47,7 +40,8 @@ def process_and_save_image(image_path, num_divisions, main_output_dir): # <--- �
             
             cropped_img.save(output_path, 'PNG')
 
-        print(f"✅ {base_name} 已成功處理並儲存 {num_divisions} 張裁切圖片。\n")
+        # 為了避免洗版，可以在成功時保持安靜，或只輸出簡易訊息
+        # print(f"✅ {base_name} 已成功處理並儲存 {num_divisions} 張裁切圖片。\n")
 
     except FileNotFoundError:
         print(f"❌ 錯誤：找不到檔案 '{image_path}'。")
@@ -58,17 +52,14 @@ def process_and_save_image(image_path, num_divisions, main_output_dir): # <--- �
 if __name__ == "__main__":
     # --- 設定區 ---
     SOURCE_FOLDER = 'png'
-    NUMBER_OF_DIVISIONS = 27
-    
-    # --- ✨ 新增設定 ✨ ---
-    # 設定統一輸出的主資料夾名稱
     MAIN_OUTPUT_FOLDER = 'cropped'
+
+    # --- ✨ 主要修改處 ✨ ---
+    # 將單一數字改成一個清單(list)，裡面可以放所有你想測試的裁切數量
+    DIVISION_SETTINGS = [27, 28, 29] # <--- 在這裡修改或增加你的設定
 
     print("===== 開始批次處理圖片 =====")
     
-    # --- ✨ 新增動作 ✨ ---
-    # 在開始處理前，先建立統一輸出的主資料夾 'cropped'
-    # exist_ok=True 表示如果資料夾已經存在，也不會報錯
     os.makedirs(MAIN_OUTPUT_FOLDER, exist_ok=True)
     
     if not os.path.isdir(SOURCE_FOLDER):
@@ -82,10 +73,21 @@ if __name__ == "__main__":
         if not all_paths:
             print(f"在 '{SOURCE_FOLDER}' 資料夾中找不到任何圖片檔案。")
         else:
+            # --- ✨ 主要修改處：使用雙層迴圈 ✨ ---
+
+            # 第一層迴圈：遍歷所有圖片檔案
             for path in all_paths:
                 if os.path.isfile(path):
-                    # --- ✨ 修改處 ✨ ---
-                    # 呼叫函式時，把主輸出資料夾名稱傳遞進去
-                    process_and_save_image(path, NUMBER_OF_DIVISIONS, MAIN_OUTPUT_FOLDER)
-            
-            print("===== 所有圖片處理完成！ =====")
+                    print(f"\n--- 正在處理圖片: {path} ---")
+                    # 第二層迴圈：遍歷你的所有裁切設定
+                    for divisions in DIVISION_SETTINGS:
+                        print(f"  > 應用設定: 裁切 {divisions} 等份...")
+                        
+                        # 建立以設定值為名的資料夾路徑，例如 'cropped/27'
+                        setting_output_dir = os.path.join(MAIN_OUTPUT_FOLDER, str(divisions))
+                        os.makedirs(setting_output_dir, exist_ok=True)
+
+                        # 呼叫函式，傳入圖片路徑、當前的裁切數量、以及對應的輸出資料夾
+                        process_and_save_image(path, divisions, setting_output_dir)
+
+            print("\n===== 所有圖片及設定均已處理完成！ =====")
