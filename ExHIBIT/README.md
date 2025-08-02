@@ -6,7 +6,8 @@
 
 表情每5個一組分類 sort_files_by_rule.py
 
-```face_fuku.py，對應顏色合成
+```
+face_fuku.py，對應顏色合成
 face\00040004F
 face\00040009F
 fuku\00040004P000.png
