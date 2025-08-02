@@ -56,49 +56,42 @@ def find_coordinates(body_path, template_face_path):
         print(f"    [錯誤] 在模板匹配中發生錯誤: {e}")
         return None
 
+# find_coordinates 函式保持不變，我們只更新 main 函式
+
 def main():
     """
-    主執行函式，處理所有批次任務。
+    主執行函式，處理所有批次任務。(採用身體輪廓作為遮罩)
     """
-    print("===== 開始批次合成任務 =====")
+    print("===== 開始批次合成任務 (採用身體輪廓遮罩模式) =====")
     
-    # 2. 建立輸出資料夾
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # 3. 遍歷 face 資料夾中的每一個角色子資料夾
     if not os.path.isdir(FACE_DIR):
-        print(f"[錯誤] 'face' 資料夾不存在！")
+        print(f"[錯誤] '{FACE_DIR}' 資料夾不存在！")
         return
 
     for face_folder_name in os.listdir(FACE_DIR):
-        # 取得角色 ID (例如從 '00040004F' 得到 '00040004')
         if not face_folder_name.endswith('F'):
             continue
         char_id = face_folder_name[:-1]
         
         print(f"\n--- 正在處理角色 ID: {char_id} ---")
         
-        # 4. 構建對應的路徑
         face_folder_path = os.path.join(FACE_DIR, face_folder_name)
         body_filename = f"{char_id}P000.png"
         body_path = os.path.join(FUKU_DIR, body_filename)
 
-        # 檢查對應的身體檔案是否存在
         if not os.path.isfile(body_path):
             print(f"  [跳過] 找不到對應的身體檔案: {body_path}")
             continue
 
-        # 5. 尋找該角色的所有表情圖片
-        expression_files = [f for f in os.listdir(face_folder_path) if f.endswith('.png')]
+        expression_files = [f for f in os.listdir(face_folder_path) if f.lower().endswith('.png')]
         if not expression_files:
             print(f"  [跳過] 在 {face_folder_path} 中找不到任何 .png 表情檔案。")
             continue
             
-        # 6. 【最佳化】僅使用第一張表情來定位座標
         print("  [定位] 使用第一張表情計算座標...")
         template_face_path = os.path.join(face_folder_path, expression_files[0])
-        print(f"    - 模板: {template_face_path}")
-        print(f"    - 身體: {body_path}")
         
         coords = find_coordinates(body_path, template_face_path)
         
@@ -108,12 +101,9 @@ def main():
             
         print(f"  [成功] 座標已定位: {coords}。現在開始合成所有表情。")
 
-        # 7. 套用座標到該角色的所有表情上
-        
-        # 為了合成，用 Pillow 載入一次身體圖片
+        # 為了合成，用 Pillow 載入身體圖片
         body_pil = Image.open(body_path).convert("RGBA")
         
-        # 建立該角色的專屬輸出資料夾
         char_output_dir = os.path.join(OUTPUT_DIR, char_id)
         os.makedirs(char_output_dir, exist_ok=True)
         
@@ -122,17 +112,41 @@ def main():
                 expression_path = os.path.join(face_folder_path, exp_filename)
                 expression_pil = Image.open(expression_path).convert("RGBA")
                 
-                # 建立一個身體圖片的副本來進行貼上，避免在原圖上重複操作
+                # --- 👇 這是實現你想法的核心邏輯 👇 ---
+                
+                # 1. 取得表情自身的遮罩 (Mask A)
+                mask_expression = expression_pil.getchannel('A')
+
+                # 2. 取得身體對應區域的遮罩 (Mask B)
+                x, y = coords
+                w, h = expression_pil.size
+                # 定義表情將要貼上的方框區域
+                box = (x, y, x + w, y + h) 
+                # 從身體圖片上裁切出這個區域
+                body_region_pil = body_pil.crop(box) 
+                # 取得這個區域的遮罩
+                mask_body = body_region_pil.getchannel('A')
+
+                # 3. 計算最終的「有效貼上範圍」遮罩 (A & B)
+                # 將 Pillow 遮罩轉為 NumPy 陣列以進行位元運算，效率最高
+                mask_expression_np = np.array(mask_expression)
+                mask_body_np = np.array(mask_body)
+                # cv2.bitwise_and 會找出兩個遮罩重疊(都不透明)的部分
+                final_mask_np = cv2.bitwise_and(mask_expression_np, mask_body_np)
+                
+                # 將合併後的 NumPy 遮罩轉回 Pillow Image 物件
+                final_mask_pil = Image.fromarray(final_mask_np)
+
+                # 4. 使用最終遮罩進行貼上
+                # 建立一個身體圖片的副本來進行貼上
                 final_image = body_pil.copy()
+                final_image.paste(expression_pil, coords, final_mask_pil)
                 
-                # 使用 Pillow 的 paste 功能進行完美合成
-                final_image.paste(expression_pil, coords, expression_pil)
+                # --- 👆 核心邏輯結束 👆 ---
                 
-                # 組合出輸出的檔案名稱
                 output_filename = f"{char_id}_{os.path.splitext(exp_filename)[0]}.png"
                 output_path = os.path.join(char_output_dir, output_filename)
                 
-                # 儲存結果
                 final_image.save(output_path)
                 print(f"    -> 已合成並儲存: {output_path}")
 
@@ -144,4 +158,8 @@ def main():
 
 # 執行主函式
 if __name__ == "__main__":
+    # 確保你定義了其他必要的全域變數
+    FACE_DIR = 'face'
+    FUKU_DIR = 'fuku'
+    OUTPUT_DIR = 'output'
     main()
