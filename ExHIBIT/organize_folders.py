@@ -1,73 +1,92 @@
 import os
 import shutil
 
-# --- 參數設定 ---
-# 你可以根據需求修改來源資料夾的路徑
-# '.' 代表目前程式碼所在的資料夾
-SOURCE_DIRECTORY = '.'
-
-def organize_folders():
+def organize_folders_within(parent_dir):
     """
-    將來源資料夾中的子資料夾，依名稱排序後，
-    每3個一組，分別移動到 '1', '2', '3' 資料夾中。
-    """
-    print("程式開始執行...")
+    在指定的父目錄 (parent_dir) 中，將其下一層的子資料夾
+    整理到 '1', '2', '3' 資料夾中。
 
-    # --- 步驟 1: 建立目標資料夾 ---
-    # 目標資料夾的名稱列表
-    destination_folders = ['1', '2', '3']
-    for folder_name in destination_folders:
-        # 組合出完整的目標資料夾路徑
-        path = os.path.join(SOURCE_DIRECTORY, folder_name)
-        # 檢查資料夾是否存在，若否則建立
+    Args:
+        parent_dir (str): 要進行整理的資料夾路徑。
+    """
+    print(f"--- 正在處理資料夾: [{parent_dir}] ---")
+
+    # --- 步驟 1: 在父目錄中建立目標資料夾 ---
+    destination_names = ['1', '2', '3']
+    for name in destination_names:
+        path = os.path.join(parent_dir, name)
         if not os.path.exists(path):
             os.makedirs(path)
-            print(f"已建立目標資料夾: {path}")
+            # print(f"在 {parent_dir} 中建立了資料夾: {name}")
 
-    # --- 步驟 2: 取得並排序所有來源資料夾 ---
+    # --- 步驟 2: 取得並排序該目錄下的子資料夾 ---
     try:
-        # 列出所有在來源路徑下的項目，並篩選出資料夾
-        all_items = os.listdir(SOURCE_DIRECTORY)
-        # 使用 os.path.isdir 來確認是否為資料夾，並排除目標資料夾本身
-        source_folders = [f for f in all_items if os.path.isdir(os.path.join(SOURCE_DIRECTORY, f)) and f not in destination_folders]
+        all_items = os.listdir(parent_dir)
+        # 篩選出所有子資料夾，並排除 '1', '2', '3' 本身
+        subfolders_to_organize = [
+            f for f in all_items 
+            if os.path.isdir(os.path.join(parent_dir, f)) and f not in destination_names
+        ]
         
-        # 依名稱排序
-        source_folders.sort()
+        subfolders_to_organize.sort()
 
-        if not source_folders:
-            print("在指定的路徑下找不到任何要處理的資料夾。")
+        if not subfolders_to_organize:
+            print("找不到可供整理的子資料夾，跳過。")
             return
 
-        print(f"找到 {len(source_folders)} 個資料夾準備處理。")
-
     except FileNotFoundError:
-        print(f"錯誤：找不到指定的來源路徑 '{SOURCE_DIRECTORY}'。請確認路徑是否正確。")
+        print(f"錯誤：找不到路徑 '{parent_dir}'。")
         return
 
     # --- 步驟 3: 分組並移動資料夾 ---
-    # 使用 range 的第三個參數 (step) 來一次跳3個
-    for i in range(0, len(source_folders), 3):
-        # 從排序好的列表中取出3個資料夾成為一組
-        group = source_folders[i:i+3]
+    for i in range(0, len(subfolders_to_organize), 3):
+        group = subfolders_to_organize[i:i+3]
 
-        # 遍歷這一組中的資料夾
         for index, folder_name in enumerate(group):
-            # 原始路徑
-            source_path = os.path.join(SOURCE_DIRECTORY, folder_name)
-            # 根據組內的順序 (0, 1, 2) 決定目標資料夾 (1, 2, 3)
-            # index 是 0, 1, 2...，對應的目標資料夾是 '1', '2', '3'
-            destination_path = os.path.join(SOURCE_DIRECTORY, destination_folders[index], folder_name)
+            # 組內的順序 (0, 1, 2) 對應到目標資料夾名稱 ('1', '2', '3')
+            dest_folder_name = destination_names[index]
+            
+            source_path = os.path.join(parent_dir, folder_name)
+            destination_path = os.path.join(parent_dir, dest_folder_name, folder_name)
 
             try:
-                # 移動資料夾
                 shutil.move(source_path, destination_path)
-                print(f"已移動 '{source_path}' -> '{destination_path}'")
+                print(f"  已移動 '{folder_name}' -> '{dest_folder_name}/{folder_name}'")
             except Exception as e:
-                print(f"移動 '{source_path}' 時發生錯誤: {e}")
+                print(f"  移動 '{source_path}' 時發生錯誤: {e}")
+
+    print(f"--- 完成處理: [{parent_dir}] ---\n")
+
+
+def process_all_main_folders(root_dir='.'):
+    """
+    遍歷根目錄下的所有主資料夾，並對每一個都執行整理。
+    """
+    print("程式開始，準備遍歷所有主要資料夾...")
     
-    print("所有資料夾處理完畢！")
+    # 取得根目錄下所有項目，篩選出資料夾
+    try:
+        main_folders = [
+            f for f in os.listdir(root_dir) 
+            if os.path.isdir(os.path.join(root_dir, f))
+        ]
+        
+        if not main_folders:
+            print("在根目錄下找不到任何主要資料夾可供處理。")
+            return
+
+        # 對每一個主資料夾，執行內部分類函式
+        for folder in main_folders:
+            main_folder_path = os.path.join(root_dir, folder)
+            organize_folders_within(main_folder_path)
+            
+        print("全部處理完畢！")
+
+    except FileNotFoundError:
+        print(f"錯誤：找不到根目錄 '{root_dir}'。")
 
 
 # --- 執行主程式 ---
 if __name__ == "__main__":
-    organize_folders()
+    # 將 '.' 改成你的專案根目錄，如果 .py 檔就放在根目錄，則不需要改
+    process_all_main_folders(root_dir='.')
