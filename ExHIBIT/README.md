@@ -12,7 +12,7 @@ crop_image2.py
 
     # 參數2: 模板匹配的相似度閾值 (0.0 到 1.0)
     # 如果找不到足夠的特徵點，可以適當降低此數值，例如 0.7
-    CORNER_MATCH_THRESHOLD = 0.75
+    CORNER_MATCH_THRESHOLD = 0.9
 
 ```
 
