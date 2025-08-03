@@ -5,13 +5,16 @@ import os
 import glob
 from collections import Counter
 
-def slice_by_corner_matching(image_path, output_dir, patch_size=50, threshold=0.75):
+# 請只用這個函式，替換掉你程式碼中的同名函式
+
+def slice_by_grid_learning(image_path, output_dir, patch_size=30, threshold=0.7):
     """
-    (使用者策略版：特徵點星座定位法)
-    透過匹配原圖四個角的特徵，來定位並裁切每一個獨立的 Sprite。
+    (最終完美版：嚴格均切 Pizza 策略)
+    1. 學習網格規則。
+    2. 根據規則進行嚴格等距、等尺寸的裁切，不對切片做任何額外處理。
     """
     try:
-        print(f"  > [策略初始化] 載入圖片並學習角落特徵...")
+        print(f"  > [策略初始化] 載入圖片...")
         source_image = cv2.imread(image_path)
         if source_image is None:
             print(f"  > ⚠️ 錯誤：無法讀取圖片 {os.path.basename(image_path)}")
@@ -20,102 +23,106 @@ def slice_by_corner_matching(image_path, output_dir, patch_size=50, threshold=0.
         h, w = source_image.shape[:2]
         base_name = os.path.splitext(os.path.basename(image_path))[0]
         
-        # 1. 學習角落特徵樣本
-        # 確保 patch_size 不會超過圖片尺寸
-        ps = min(patch_size, w // 2, h // 2)
-        if ps == 0:
-            print("  > ⚠️ 圖片尺寸過小，無法執行此策略。")
+        # --- 步驟一：學習網格規則 (此部分不變) ---
+        print(f"  > [學習階段] 正在偵測特徵點以學習網格規則...")
+        ps = min(patch_size, w // 4, h // 4)
+        if ps < 10:
+            print("  > ⚠️ 圖片尺寸過小或patch_size設定過小，無法執行此策略。")
             return
-
+            
         template_tl = source_image[0:ps, 0:ps]
-        template_tr = source_image[0:ps, w-ps:w]
-        
-        print(f"  > [特徵學習完成] 左上角樣本尺寸: {ps}x{ps}, 右上角樣本尺寸: {ps}x{ps}")
-
-        # 2. 搜尋所有特徵匹配點
-        print(f"  > [全圖搜尋] 正在尋找所有左上角和右上角的匹配點...")
         res_tl = cv2.matchTemplate(source_image, template_tl, cv2.TM_CCOEFF_NORMED)
         loc_tl = np.where(res_tl >= threshold)
 
-        res_tr = cv2.matchTemplate(source_image, template_tr, cv2.TM_CCOEFF_NORMED)
-        loc_tr = np.where(res_tr >= threshold)
-
-        # 3. 過濾與配對匹配點
-        # 過濾相鄰的點，得到更精確的候選列表
         def filter_points(locations, patch_size):
             points = []
-            for pt in zip(*locations[::-1]): # (x, y)
-                is_overlapping = False
-                for p_stored in points:
-                    if abs(pt[0] - p_stored[0]) < patch_size * 0.5 and abs(pt[1] - p_stored[1]) < patch_size * 0.5:
-                        is_overlapping = True
-                        break
-                if not is_overlapping:
+            for pt in zip(*locations[::-1]):
+                if not any(abs(pt[0] - p_stored[0]) < patch_size * 0.5 and abs(pt[1] - p_stored[1]) < patch_size * 0.5 for p_stored in points):
                     points.append(pt)
             return sorted(points)
 
         tl_points = filter_points(loc_tl, ps)
-        tr_points = filter_points(loc_tr, ps)
         
-        print(f"  > [搜尋完成] 找到 {len(tl_points)} 個左上角候選點，{len(tr_points)} 個右上角候選點。")
-        if not tl_points or not tr_points:
-            print(f"  > ⚠️ 未能找到足夠的特徵點，請嘗試降低 CORNER_MATCH_THRESHOLD。")
+        if len(tl_points) < 2:
+            print(f"  > ⚠️ 未能找到足夠的特徵點來推斷網格。請嘗試降低 CORNER_MATCH_THRESHOLD。")
+            Image.open(image_path).save(os.path.join(output_dir, f"{base_name}_uncut.png"), 'PNG')
             return
 
-        # 4. 尋找最可能的 Sprite 寬度並確定所有裁切框
-        print(f"  > [配對分析] 正在尋找最佳的 Sprite 寬度...")
-        width_candidates = []
-        for p_tl in tl_points:
-            for p_tr in tr_points:
-                # 條件：y座標非常接近，且 tr 在 tl 右邊
-                if abs(p_tl[1] - p_tr[1]) < 5 and p_tr[0] > p_tl[0]:
-                    width_candidates.append(p_tr[0] - p_tl[0] + ps)
+        rows = {}
+        for x, y in tl_points:
+            found_row = False
+            for row_y in rows:
+                if abs(y - row_y) < ps:
+                    rows[row_y].append(x)
+                    found_row = True
+                    break
+            if not found_row:
+                rows[y] = [x]
         
-        if not width_candidates:
-            print(f"  > ⚠️ 無法配對任何左上角與右上角特徵點。")
-            return
+        x_steps = []
+        for row_y in rows:
+            row_xs = sorted(rows[row_y])
+            for i in range(len(row_xs) - 1):
+                x_steps.append(row_xs[i+1] - row_xs[i])
+        
+        if not x_steps:
+             print(f"  > ⚠️ 找到的特徵點無法構成多列網格。")
+             Image.open(image_path).save(os.path.join(output_dir, f"{base_name}_uncut.png"), 'PNG')
+             return
 
-        # 投票選出最常見的寬度
-        width_counts = Counter(width_candidates)
-        most_common_width = width_counts.most_common(1)[0][0]
-        print(f"  > [寬度確定] 最有可能的 Sprite 寬度為: {most_common_width} 像素。")
+        most_common_step = Counter(x_steps).most_common(1)[0][0]
+        row_y_coords = sorted(rows.keys())
+        start_x = min(x for row in rows.values() for x in row)
 
-        # 5. 根據左上角點和計算出的寬度，定義所有裁切框
-        print(f"  > [最終裁切] 根據 {len(tl_points)} 個左上角定位點進行裁切...")
+        print(f"  > [學習完成] 網格規則 -> 水平步長/寬度: {most_common_step}px, 總行數: {len(row_y_coords)}")
+
+        # --- 步驟二：應用規則進行嚴格均勻裁切 ---
+        print(f"  > [裁切階段] 正在根據學習到的網格規則進行嚴格均切...")
         pil_img = Image.open(image_path)
-        
         specific_output_folder = os.path.join(output_dir, base_name)
         os.makedirs(specific_output_folder, exist_ok=True)
         
-        for i, (x, y) in enumerate(tl_points):
-            box = (x, 0, x + most_common_width, h) # y 從0開始，高度為整張圖高
-            cropped_img = pil_img.crop(box)
-            
-            output_filename = f"{base_name}_{i+1:03}.png"
-            output_path = os.path.join(specific_output_folder, output_filename)
-            cropped_img.save(output_path, 'PNG')
-            
-        print(f"  > [裁切完成] 已成功儲存 {len(tl_points)} 張裁切圖片。")
+        count = 0
+        # 假設所有表情的高度都一樣，等於原圖高度
+        sprite_h = h 
+
+        for row_y in row_y_coords:
+            num_cols = (w - start_x) // most_common_step + 1
+            for i in range(num_cols):
+                # 根據學習到的規則，計算出每一個網格的精確位置
+                x = start_x + i * most_common_step
+                
+                # 如果計算出的下一個切片起點已經非常靠近圖片邊緣，則停止
+                if x > w - most_common_step * 0.5: break
+
+                # 定義嚴格的、等尺寸的裁切框
+                box = (x, 0, x + most_common_step, sprite_h)
+                cropped_img = pil_img.crop(box)
+
+                # ✨✨✨ 關鍵修正點：刪除了裁掉空白的程式碼 ✨✨✨
+                # 現在，cropped_img 會被直接儲存，保留其原始的、均一的網格尺寸。
+
+                count += 1
+                output_filename = f"{base_name}_{count:03}.png"
+                output_path = os.path.join(specific_output_folder, output_filename)
+                cropped_img.save(output_path, 'PNG')
+
+        print(f"  > [裁切完成] 已成功儲存 {count} 張尺寸均一的圖片。")
 
     except Exception as e:
         print(f"  > ❌ 處理 '{os.path.basename(image_path)}' 時發生致命錯誤: {e}")
 
-
-# --- 主程式執行區 (全新) ---
+# --- 主程式執行區 ---
 if __name__ == "__main__":
     SOURCE_FOLDER = 'png'
-    MAIN_OUTPUT_FOLDER = 'cropped_by_user_strategy'
+    MAIN_OUTPUT_FOLDER = 'cropped_pizza_cut'
 
     # --- 參數調整區 ---
-    # 參數1: 從角落抓取特徵樣本的大小（像素）
-    CORNER_PATCH_SIZE = 20 
-
-    # 參數2: 模板匹配的相似度閾值 (0.0 到 1.0)
-    # 如果找不到足夠的特徵點，可以適當降低此數值，例如 0.7
+    CORNER_PATCH_SIZE = 20 # 可以嘗試減小此值，例如 30 或 20
     CORNER_MATCH_THRESHOLD = 0.9
     # ------------------
 
-    print("===== 開始執行「特徵點星座定位法」裁切 =====")
+    print("===== 開始執行「Pizza均切」策略 =====")
     print(f"設定: 樣本尺寸={CORNER_PATCH_SIZE}px, 匹配閾值={CORNER_MATCH_THRESHOLD}")
     
     os.makedirs(MAIN_OUTPUT_FOLDER, exist_ok=True)
@@ -128,7 +135,6 @@ if __name__ == "__main__":
     else:
         for path in image_paths:
             print(f"\n--- 正在分析圖片: {os.path.basename(path)} ---")
-            slice_by_corner_matching(path, MAIN_OUTPUT_FOLDER, CORNER_PATCH_SIZE, CORNER_MATCH_THRESHOLD)
-
+            slice_by_grid_learning(path, MAIN_OUTPUT_FOLDER, CORNER_PATCH_SIZE, CORNER_MATCH_THRESHOLD)
 
     print("\n===== 所有圖片均已處理完成！ =====")
