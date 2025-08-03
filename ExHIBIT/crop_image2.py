@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
     # 參數2: 模板匹配的相似度閾值 (0.0 到 1.0)
     # 如果找不到足夠的特徵點，可以適當降低此數值，例如 0.7
-    CORNER_MATCH_THRESHOLD = 0.75
+    CORNER_MATCH_THRESHOLD = 0.9
     # ------------------
 
     print("===== 開始執行「特徵點星座定位法」裁切 =====")
@@ -129,5 +129,6 @@ if __name__ == "__main__":
         for path in image_paths:
             print(f"\n--- 正在分析圖片: {os.path.basename(path)} ---")
             slice_by_corner_matching(path, MAIN_OUTPUT_FOLDER, CORNER_PATCH_SIZE, CORNER_MATCH_THRESHOLD)
+
 
     print("\n===== 所有圖片均已處理完成！ =====")
