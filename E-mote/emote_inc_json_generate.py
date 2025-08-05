@@ -58,7 +58,7 @@ def get_base_timeline_template():
         ]
     }
 
-# --- 區塊 2: 核心處理邏輯 (最終版) ---
+# --- 區塊 2: 核心處理邏輯 (已修正) ---
 
 def parse_inc_file_fully(file_path):
     """從 .inc 檔案中解析所有差分類別及其選項 (包含'無し')。"""
@@ -109,7 +109,11 @@ def parse_inc_file_fully(file_path):
     return all_categories
 
 def build_nested_folders(combination_data, folder_order):
-    """將組合好的資料轉換為巢狀資料夾結構"""
+    """(已修正) 將組合好的資料轉換為巢狀資料夾結構，處理沒有 modifier 的情況。"""
+    # 【錯誤修正】如果 folder_order 為空，代表沒有修飾屬性，直接回傳扁平的 timeline 列表
+    if not folder_order:
+        return [data['timeline'] for data in combination_data]
+
     root = {}
     for data in combination_data:
         current_level = root
@@ -122,14 +126,15 @@ def build_nested_folders(combination_data, folder_order):
         current_level.append(data['timeline'])
     return root
 
-def convert_structure_to_json_list(nested_dict, folder_order):
-    """遞迴地將巢狀字典轉換為 e-mote 的 folder/children 列表結構"""
-    if not isinstance(nested_dict, dict) or not folder_order:
-        return create_timeline_children(nested_dict)
+def convert_structure_to_json_list(nested_data, folder_order):
+    """遞迴地將巢狀結構轉換為 e-mote 的 folder/children 列表結構"""
+    # 如果folder_order為空，代表nested_data本身就是最終的timeline列表
+    if not folder_order:
+        return create_timeline_children(nested_data)
 
     output_list = []
     remaining_folders = folder_order[1:]
-    for key, value in sorted(nested_dict.items()):
+    for key, value in sorted(nested_data.items()):
         folder = {"type": "folder", "label": key, "children": convert_structure_to_json_list(value, remaining_folders)}
         output_list.append(folder)
     return output_list
@@ -152,15 +157,8 @@ def create_timeline_children(expressions):
 
 if __name__ == "__main__":
     # --- 使用者設定 ---
-    # 1. 定義所有要參與組合的「修飾屬性」類別。
-    #    列表順序 = 資料夾層級順序
-    MODIFIER_CATEGORIES = ["髪型", "頬", "手袋", "前髪", "頭部装飾", "マフラー", "陰毛"]
-    
-    # 2. 【新功能】在此填入本次執行不想組合的類別名稱
-    #    例如: EXCLUDED_MODIFIERS = ["陰毛", "手袋"]
-    EXCLUDED_MODIFIERS = ["陰毛", "手袋", "マフラー"]
-    
-    # 3. 定義主要的表情類別
+    MODIFIER_CATEGORIES = ["髪型", "頬", "手袋", "マフラー", "陰毛"]
+    EXCLUDED_MODIFIERS = []
     EXPRESSION_CATEGORY = "表情"
     # --- 設定結束 ---
 
@@ -181,7 +179,6 @@ if __name__ == "__main__":
 
         expressions = [e for e in all_data.get(EXPRESSION_CATEGORY, []) if e['name'] not in ['無し', '']]
         
-        # (修正) 準備組合列表時，尊重 EXCLUDED_MODIFIERS 設定
         active_categories_for_combo = [cat for cat in MODIFIER_CATEGORIES if cat in all_data and cat not in EXCLUDED_MODIFIERS]
         
         modifier_lists_with_category = []
@@ -208,8 +205,6 @@ if __name__ == "__main__":
                     pattern = mod_item['pattern']
                     
                     merged_params.update(pattern['params'])
-                    
-                    # (修正) 建立帶有檔名前綴的、唯一的資料夾路徑
                     folder_path_parts.append(f"{basename}{category_name}_{pattern['name']}")
                     suffix_parts.append(f"{category_name}_{pattern['id']}")
                 
@@ -233,7 +228,7 @@ if __name__ == "__main__":
         final_object = {"value": all_file_folders, "id": "emote_timelinelist"}
         final_json_string = json.dumps(final_object, indent=1, ensure_ascii=False)
         
-        output_filename = "output_final_prefixed.json"
+        output_filename = "output_final_prefixed_fixed.json"
         with open(output_filename, 'w', encoding='utf-8') as f:
             f.write(final_json_string)
         print(f"\n成功！所有排列組合已生成並寫入 '{output_filename}' 檔案。")
