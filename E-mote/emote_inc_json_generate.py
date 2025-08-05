@@ -3,13 +3,13 @@ import glob
 import json
 import copy
 import re
+import sys
 from itertools import product
 
 # --- 區塊 1: JSON 範本定義 ---
-# (此區塊與之前相同)
 def get_base_timeline_template():
-    """回傳一個空白的、符合 e-mote 格式的單一時間軸範本。"""
-    # ... 完整的範本定義與之前相同 ...
+    """回傳一個基礎的、空白的單一時間軸範本，用於兩種模式。"""
+    # ... 範本定義與之前相同 ...
     return {
         "loopBegin": -1, "loopEnd": -1, "lastTime": -1, "diff": 0, "label": "預設標籤",
         "variableList": [
@@ -57,11 +57,11 @@ def get_base_timeline_template():
             {"label": "vr_UD", "frameList": [{"time": 0, "content": {"value": 0.0, "easing": 0}, "type": 2}, {"time": 1, "content": None, "type": 0}]}
         ]
     }
-
-# --- 區塊 2: 核心處理邏輯 (已修正) ---
+# --- 區塊 2: 核心處理邏輯 ---
 
 def parse_inc_file_fully(file_path):
-    """從 .inc 檔案中解析所有差分類別及其選項 (包含'無し')。"""
+    """從 .inc 檔案中解析所有差分類別及其選項。"""
+    # ... 此函數與之前版本相同 ...
     all_categories = {}
     dif_definitions = {}
     try:
@@ -109,9 +109,9 @@ def parse_inc_file_fully(file_path):
     return all_categories
 
 def build_nested_folders(combination_data, folder_order):
-    """(已修正) 將組合好的資料轉換為巢狀資料夾結構，處理沒有 modifier 的情況。"""
-    # 【錯誤修正】如果 folder_order 為空，代表沒有修飾屬性，直接回傳扁平的 timeline 列表
+    """將組合好的資料轉換為巢狀資料夾結構。"""
     if not folder_order:
+        # 如果沒有修飾屬性，直接回傳扁平列表 (現在是單一的合併後timeline)
         return [data['timeline'] for data in combination_data]
 
     root = {}
@@ -128,9 +128,9 @@ def build_nested_folders(combination_data, folder_order):
 
 def convert_structure_to_json_list(nested_data, folder_order):
     """遞迴地將巢狀結構轉換為 e-mote 的 folder/children 列表結構"""
-    # 如果folder_order為空，代表nested_data本身就是最終的timeline列表
     if not folder_order:
-        return create_timeline_children(nested_data)
+        # 到達最深層，直接回傳已包含最終 timeline 物件的列表
+        return nested_data
 
     output_list = []
     remaining_folders = folder_order[1:]
@@ -139,8 +139,8 @@ def convert_structure_to_json_list(nested_data, folder_order):
         output_list.append(folder)
     return output_list
     
-def create_timeline_children(expressions):
-    """將最終的組合表情物件列表轉換為 timeline 列表"""
+def create_separate_timeline_children(expressions):
+    """為 'separate_files' 模式將組合表情物件轉換為 timeline 列表"""
     base_template = get_base_timeline_template()
     children = []
     for expr in sorted(expressions, key=lambda x: x['name']):
@@ -157,19 +157,34 @@ def create_timeline_children(expressions):
 
 if __name__ == "__main__":
     # --- 使用者設定 ---
-    MODIFIER_CATEGORIES = ["髪型", "頬", "手袋", "マフラー", "陰毛"]
-    EXCLUDED_MODIFIERS = []
+    # 1. 輸出模式:
+    #    "separate_files"     -> 每一個組合都是獨立的 timeline
+    #    "combined_per_folder" -> 同一組合下的所有表情，合併為一個多影格 timeline
+    OUTPUT_MODE = "combined_per_folder"
+    
+    MODIFIER_CATEGORIES = ["髪型", "頬", "手袋", "前髪", "頭部装飾", "マフラー"]
+    EXCLUDED_MODIFIERS = ["陰毛"]
     EXPRESSION_CATEGORY = "表情"
     # --- 設定結束 ---
 
-    inc_files = glob.glob('*.inc')
-    if not inc_files: print("在目前資料夾中找不到任何 .inc 檔案。")
-    else: print(f"找到了 {len(inc_files)} 個 .inc 檔案: {', '.join(inc_files)}")
+    if len(sys.argv) > 1:
+        inc_files = [f for f in sys.argv[1:] if f.lower().endswith('.inc')]
+        print("--- 拖放模式 ---")
+    else:
+        inc_files = glob.glob('*.inc')
+        print("--- 批次模式 ---")
+    
+    if not inc_files:
+        print("在目前資料夾中找不到任何 .inc 檔案。")
+        if sys.platform == "win32": input("請按 Enter 鍵結束...")
+        sys.exit()
 
+    print(f"準備處理 {len(inc_files)} 個 .inc 檔案: {', '.join(os.path.basename(f) for f in inc_files)}")
+
+    # --- 資料處理與組合 ---
     all_file_folders = []
-
     for file_path in inc_files:
-        print(f"\n--- 正在處理檔案: {file_path} ---")
+        print(f"\n--- 正在處理檔案: {os.path.basename(file_path)} ---")
         basename = os.path.splitext(os.path.basename(file_path))[0]
         
         all_data = parse_inc_file_fully(file_path)
@@ -177,60 +192,98 @@ if __name__ == "__main__":
             print(f"在 {file_path} 中找不到 '{EXPRESSION_CATEGORY}' 資料，已跳過。")
             continue
 
-        expressions = [e for e in all_data.get(EXPRESSION_CATEGORY, []) if e['name'] not in ['無し', '']]
-        
+        expressions = sorted([e for e in all_data.get(EXPRESSION_CATEGORY, []) if e['name'] not in ['無し', '']], key=lambda x: x['name'])
         active_categories_for_combo = [cat for cat in MODIFIER_CATEGORIES if cat in all_data and cat not in EXCLUDED_MODIFIERS]
         
-        modifier_lists_with_category = []
-        for cat in active_categories_for_combo:
-            modifier_lists_with_category.append([{'category': cat, 'pattern': p} for p in all_data[cat]])
+        modifier_lists_with_category = [[{'category': cat, 'pattern': p} for p in all_data[cat]] for cat in active_categories_for_combo]
+        modifier_combinations = list(product(*modifier_lists_with_category)) if modifier_lists_with_category else [[]]
 
-        if not modifier_lists_with_category:
-            modifier_combinations = [[]]
-        else:
-            modifier_combinations = list(product(*modifier_lists_with_category))
+        print(f"找到 {len(expressions)} 個主表情, {len(modifier_combinations)} 種修飾組合。")
 
-        print(f"找到 {len(expressions)} 個主表情, {len(modifier_combinations)} 種修飾組合，總計將生成 {len(expressions) * len(modifier_combinations)} 個組合表情。")
-
-        combined_expression_data = []
-        for expression in expressions:
-            for mod_combo in modifier_combinations:
-                merged_params = {}
-                base_name_part = f"{basename}_{expression['name']}{expression['id']}"
-                suffix_parts = []
-                folder_path_parts = []
-
-                for mod_item in mod_combo:
-                    category_name = mod_item['category']
-                    pattern = mod_item['pattern']
+        # --- 根據輸出模式決定生成邏輯 ---
+        if OUTPUT_MODE == 'separate_files':
+            # 模式1: 每個組合都是獨立的 timeline
+            combination_data = []
+            for expression in expressions:
+                for mod_combo in modifier_combinations:
+                    merged_params = {}
+                    base_name_part = f"{basename}_{expression['name']}{expression['id']}"
+                    suffix_parts, folder_path_parts = [], []
+                    for item in mod_combo:
+                        merged_params.update(item['pattern']['params'])
+                        folder_path_parts.append(f"{basename}{item['category']}_{item['pattern']['name']}")
+                        suffix_parts.append(f"{item['category']}_{item['pattern']['id']}")
+                    merged_params.update(expression['params'])
+                    final_name = f"{base_name_part}_{'_'.join(suffix_parts)}" if suffix_parts else base_name_part
                     
-                    merged_params.update(pattern['params'])
-                    folder_path_parts.append(f"{basename}{category_name}_{pattern['name']}")
-                    suffix_parts.append(f"{category_name}_{pattern['id']}")
-                
-                merged_params.update(expression['params'])
-                final_name = f"{base_name_part}_{'_'.join(suffix_parts)}" if suffix_parts else base_name_part
-                
-                combined_timeline = {"name": final_name, "params": merged_params}
-                combined_expression_data.append({"folder_path": folder_path_parts, "timeline": combined_timeline})
+                    timeline_obj = {"name": final_name, "params": merged_params}
+                    combination_data.append({"folder_path": folder_path_parts, "timeline": timeline_obj})
 
-        if combined_expression_data:
-            nested_structure = build_nested_folders(combined_expression_data, active_categories_for_combo)
-            file_main_folder = {
-                "type": "folder",
-                "label": basename,
-                "children": convert_structure_to_json_list(nested_structure, active_categories_for_combo)
-            }
-            all_file_folders.append(file_main_folder)
+            nested_structure = build_nested_folders(combination_data, active_categories_for_combo)
+            # 在這裡，最深層的 children 是 create_separate_timeline_children 產生的
+            # 我們需要一個修改版的 convert_structure
+            def convert_to_separate_json(nested_data, folder_order):
+                if not folder_order: return create_separate_timeline_children(nested_data)
+                output_list = []
+                for key, value in sorted(nested_data.items()):
+                    folder = {"type": "folder", "label": key, "children": convert_to_separate_json(value, folder_order[1:])}
+                    output_list.append(folder)
+                return output_list
 
+            children = convert_to_separate_json(nested_structure, active_categories_for_combo)
+
+        elif OUTPUT_MODE == 'combined_per_folder':
+            # 模式2: 每個組合是一個多影格 timeline
+            combination_data = []
+            for mod_combo in modifier_combinations:
+                # 為這個修飾組合建立一個 timeline
+                combined_timeline_obj = get_base_timeline_template()
+                num_frames = len(expressions)
+
+                for variable in combined_timeline_obj['variableList']:
+                    label, last_value = variable['label'], variable['frameList'][0]['content']['value']
+                    new_frame_list = []
+                    for t, expression in enumerate(expressions):
+                        # 合併參數: 修飾 -> 表情
+                        merged_params = {}
+                        suffix_parts, folder_path_parts = [], []
+                        for item in mod_combo:
+                            merged_params.update(item['pattern']['params'])
+                            folder_path_parts.append(f"{basename}{item['category']}_{item['pattern']['name']}")
+                            suffix_parts.append(f"{item['category']}_{item['pattern']['id']}")
+                        merged_params.update(expression['params'])
+                        
+                        current_value = merged_params.get(label, last_value)
+                        new_frame_list.append({"time": t, "content": {"value": current_value, "easing": 0}, "type": 2})
+                        last_value = current_value
+                    
+                    new_frame_list.append({"time": num_frames, "content": None, "type": 0})
+                    variable['frameList'] = new_frame_list
+
+                combined_timeline_obj['lastTime'] = num_frames
+                combined_timeline_obj['label'] = "_".join([p.split('_')[-1] for p in folder_path_parts]) or "Default"
+                
+                combination_data.append({"folder_path": folder_path_parts, "timeline": combined_timeline_obj})
+            
+            nested_structure = build_nested_folders(combination_data, active_categories_for_combo)
+            children = convert_structure_to_json_list(nested_structure, active_categories_for_combo)
+
+        else:
+            print(f"錯誤：未知的 OUTPUT_MODE '{OUTPUT_MODE}'。")
+            continue
+
+        all_file_folders.append({"type": "folder", "label": basename, "children": children})
+
+    # --- 最終檔案寫入 ---
     if all_file_folders:
-        print(f"\n--- 處理完成，準備寫入最終 JSON ---")
         final_object = {"value": all_file_folders, "id": "emote_timelinelist"}
         final_json_string = json.dumps(final_object, indent=1, ensure_ascii=False)
-        
-        output_filename = "output_final_prefixed_fixed.json"
+        output_filename = f"output_{OUTPUT_MODE}.json"
         with open(output_filename, 'w', encoding='utf-8') as f:
             f.write(final_json_string)
-        print(f"\n成功！所有排列組合已生成並寫入 '{output_filename}' 檔案。")
+        print(f"\n成功！已生成 '{output_filename}' 檔案。")
     else:
         print("\n沒有從任何檔案中解析出可用的資料，未生成 JSON 檔案。")
+
+    if sys.platform == "win32":
+        input("處理完畢，請按 Enter 鍵結束...")
