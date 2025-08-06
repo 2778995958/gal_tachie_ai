@@ -44,10 +44,10 @@ def composite_high_quality(background_img, foreground_img, position):
 
     return Image.fromarray(final_np_uint8, 'RGBA')
 
-# --- 資料處理函式 (維持不變) ---
+# --- 動態檢測資料處理函式 (維持不變) ---
 def prepare_data(csv_path):
     """
-    讀取並處理 'coordinates.csv' 檔案
+    讀取CSV並動態識別「手」與「配件」圖層。
     """
     try:
         df = pd.read_csv(csv_path)
@@ -56,116 +56,129 @@ def prepare_data(csv_path):
         return None
 
     character_data = defaultdict(lambda: {
-        'body': None, 'blush': None, 'expressions': [], 'hands': []
+        'body': None, 'blush': None, 'expressions': [], 'hands': [], 'accessories': []
     })
+    get_id = lambda name: int(name.split('_')[1])
+
     df['character_id'] = df['frame_index'].apply(lambda x: x.split('_')[0])
 
     for char_id, group in df.groupby('character_id'):
-        blush_files = group[group['frame_index'].str.contains(r'_1\d{2,}$')]
-        if not blush_files.empty:
-            character_data[char_id]['blush'] = blush_files.sort_values('frame_index').iloc[-1].to_dict()
-
+        dynamic_layers = group[group['frame_index'].apply(get_id) >= 400]
+        if dynamic_layers.empty:
+            hand_prefix = '4'
+        else:
+            max_id = dynamic_layers['frame_index'].apply(get_id).max()
+            hand_prefix = str(max_id)[0]
+        
+        accessory_prefixes = [str(i) for i in range(4, int(hand_prefix))]
+        
         for _, row in group.iterrows():
-            part_code = row['frame_index'].split('_')[1]
-            if part_code == '0':
-                character_data[char_id]['body'] = row.to_dict()
-            elif part_code.startswith(('2', '3')):
-                character_data[char_id]['expressions'].append(row.to_dict())
-            elif part_code.startswith('4'):
-                character_data[char_id]['hands'].append(row.to_dict())
-    
+            part_info = row.to_dict()
+            part_code_str = row['frame_index'].split('_')[1]
+
+            if part_code_str.startswith(hand_prefix):
+                character_data[char_id]['hands'].append(part_info)
+            elif any(part_code_str.startswith(p) for p in accessory_prefixes):
+                character_data[char_id]['accessories'].append(part_info)
+            elif part_code_str.startswith(('2', '3')):
+                character_data[char_id]['expressions'].append(part_info)
+            elif part_code_str.startswith('1'):
+                if not character_data[char_id]['blush'] or get_id(row['frame_index']) > get_id(character_data[char_id]['blush']['frame_index']):
+                    character_data[char_id]['blush'] = part_info
+            elif part_code_str == '0':
+                character_data[char_id]['body'] = part_info
+
     return dict(character_data)
 
-# --- 主合成函式 (已更新) ---
+# --- 主合成函式 (已修正錯誤) ---
 def combine_character_sprites(character_id, parts_info, image_folder, output_folder):
     """
-    主合成函式，已加入對身體部件的強制檢查。
+    主合成函式，已修正 'unhashable type: dict' 錯誤。
     """
     body = parts_info.get('body')
     blush = parts_info.get('blush')
     expressions = parts_info.get('expressions', [])
     hands = parts_info.get('hands', [])
+    accessories = parts_info.get('accessories', [])
 
-    if not body:
-        print(f"警告：角色 {character_id} 在CSV中找不到身體部件 (_0) 的資料，已跳過整個角色。")
+    if not body or not hands or not expressions:
+        print(f"警告：角色 {character_id} 缺少必要部件 (身/手/表情)，無法產生組合。")
         return
-    if not hands or not expressions:
-        print(f"警告：角色 {character_id} 缺少手或表情部件的CSV資料，無法產生組合。")
-        return
-
-    print(f"正在處理角色: {character_id} (使用高精度模式)...")
+    
+    print(f"正在處理角色: {character_id} (動態檢測模式)...")
     base_x, base_y = body['offset_x'], body['offset_y']
+    
+    accessories_to_loop = accessories if accessories else [None]
 
     for hand in hands:
-        for expression in expressions:
-            hand_id = hand['frame_index'].split('_')[1]
-            exp_id = expression['frame_index'].split('_')[1]
-            
-            output_filename_base = f"{character_id}_{hand_id}_{exp_id}"
-            output_path_standard = os.path.join(output_folder, f"{output_filename_base}.png")
-            
-            if os.path.exists(output_path_standard):
-                print(f"  跳過：檔案 {output_filename_base}.png 已存在。")
-                continue
+        for accessory in accessories_to_loop:
+            for expression in expressions:
+                hand_id = hand['frame_index'].split('_')[1]
+                exp_id = expression['frame_index'].split('_')[1]
+                accessory_id = accessory['frame_index'].split('_')[1] if accessory else None
 
-            # --- 計算動態畫布大小 ---
-            parts_to_combine = [body, hand, expression]
-            if blush: parts_to_combine.append(blush)
+                fname_parts_base = [character_id, hand_id, exp_id]
+                if accessory_id: fname_parts_base.append(accessory_id)
+                output_filename_base = "_".join(fname_parts_base) + ".png"
+                output_path_base = os.path.join(output_folder, output_filename_base)
+                
+                if blush:
+                    blush_id = blush['frame_index'].split('_')[1]
+                    fname_parts_blush = [character_id, hand_id, blush_id, exp_id]
+                    if accessory_id: fname_parts_blush.append(accessory_id)
+                    output_filename_blush = "_".join(fname_parts_blush) + ".png"
+                    output_path_blush = os.path.join(output_folder, output_filename_blush)
 
-            min_x = min(p['offset_x'] - base_x for p in parts_to_combine)
-            min_y = min(p['offset_y'] - base_y for p in parts_to_combine)
-            max_x = max((p['offset_x'] - base_x) + p['width'] for p in parts_to_combine)
-            max_y = max((p['offset_y'] - base_y) + p['height'] for p in parts_to_combine)
-            
-            canvas_width = int(max_x - min_x)
-            canvas_height = int(max_y - min_y)
+                layers_no_blush = [body, hand, expression]
+                if accessory: layers_no_blush.append(accessory)
 
-            # --- 關鍵修正：優先處理身體部件，若失敗則跳過整個組合 ---
-            # 1. 建立透明畫布
-            current_composite = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
-            
-            # 2. 嘗試載入並合成身體
-            try:
-                body_img = Image.open(os.path.join(image_folder, f"{body['frame_index']}.png")).convert("RGBA")
-                paste_x = int((body['offset_x'] - base_x) - min_x)
-                paste_y = int((body['offset_y'] - base_y) - min_y)
-                current_composite = composite_high_quality(current_composite, body_img, (paste_x, paste_y))
-            except FileNotFoundError:
-                # 如果找不到身體圖檔，則此組合無效，直接跳到下一個組合
-                print(f"  錯誤：找不到基礎身體圖檔 {body['frame_index']}.png，組合 {output_filename_base} 已取消。")
-                continue # 使用 continue 跳到 for-loop 的下一次迭代
+                layers_with_blush = []
+                if blush:
+                    layers_with_blush = [body, hand, blush, expression]
+                    if accessory: layers_with_blush.append(accessory)
 
-            # 3. 只有在身體成功後，才繼續合成手和表情
-            for part in [hand, expression]:
-                try:
-                    part_img = Image.open(os.path.join(image_folder, f"{part['frame_index']}.png")).convert("RGBA")
-                    paste_x = int((part['offset_x'] - base_x) - min_x)
-                    paste_y = int((part['offset_y'] - base_y) - min_y)
-                    current_composite = composite_high_quality(current_composite, part_img, (paste_x, paste_y))
-                except FileNotFoundError:
-                    # 找不到手或表情是可選的，只警告不中斷
-                    print(f"  警告：找不到圖片檔案 {part['frame_index']}.png，已在本次合成中跳過此部件。")
-                    continue
-            
-            # 4. 儲存結果
-            current_composite.save(output_path_standard)
-            print(f"  已儲存: {output_filename_base}.png")
+                # --- 關鍵修正：修復 'unhashable type: dict' 錯誤 ---
+                # 舊的錯誤方法: all_possible_parts = list(dict.fromkeys(layers_no_blush + layers_with_blush))
+                # 新的正確方法：透過 frame_index 來建立唯一的部件字典
+                combined_layers = layers_no_blush + layers_with_blush
+                unique_parts_map = {}
+                for part in combined_layers:
+                    if part:  # 確保部件不是 None
+                        unique_parts_map[part['frame_index']] = part
+                all_possible_parts = list(unique_parts_map.values())
+                
+                if not all_possible_parts: continue
+                
+                min_x = min(p['offset_x'] - base_x for p in all_possible_parts)
+                min_y = min(p['offset_y'] - base_y for p in all_possible_parts)
+                max_x = max((p['offset_x'] - base_x) + p['width'] for p in all_possible_parts)
+                max_y = max((p['offset_y'] - base_y) + p['height'] for p in all_possible_parts)
+                canvas_width, canvas_height = int(max_x - min_x), int(max_y - min_y)
 
-            # 5. 合成臉紅並儲存
-            if blush:
-                try:
-                    blush_img = Image.open(os.path.join(image_folder, f"{blush['frame_index']}.png")).convert("RGBA")
-                    paste_x = int((blush['offset_x'] - base_x) - min_x)
-                    paste_y = int((blush['offset_y'] - base_y) - min_y)
-                    blush_composite = composite_high_quality(current_composite, blush_img, (paste_x, paste_y))
+                def process_and_save(path, layers):
+                    if not layers: return
+                    if os.path.exists(path):
+                        return
                     
-                    output_path_blush = os.path.join(output_folder, f"{output_filename_base}_blush.png")
-                    blush_composite.save(output_path_blush)
-                except FileNotFoundError:
-                    print(f"  警告：找不到臉紅檔案 {blush['frame_index']}.png。")
+                    canvas = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+                    for part in layers:
+                        try:
+                            img = Image.open(os.path.join(image_folder, f"{part['frame_index']}.png")).convert("RGBA")
+                            px = int((part['offset_x'] - base_x) - min_x)
+                            py = int((part['offset_y'] - base_y) - min_y)
+                            canvas = composite_high_quality(canvas, img, (px, py))
+                        except FileNotFoundError:
+                            print(f"  警告: 找不到圖檔 {part['frame_index']}.png")
+                            if part['frame_index'] == body['frame_index']: return
+                    
+                    canvas.save(path)
+                    print(f"  已儲存: {os.path.basename(path)}")
+
+                process_and_save(output_path_base, layers_no_blush)
+                if blush:
+                    process_and_save(output_path_blush, layers_with_blush)
 
     print(f"角色 {character_id} 已處理完畢。")
-
 
 # --- 主程式進入點 (維持不變) ---
 if __name__ == "__main__":
