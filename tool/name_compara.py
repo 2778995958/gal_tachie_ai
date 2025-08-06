@@ -4,7 +4,7 @@ import sys # 匯入 sys 模組來處理命令列參數
 
 def find_and_move_duplicates_by_filename(old_dir, new_dir, dup_dir):
     """
-    主函式，尋找 old_dir 中與 new_dir 內檔案同名的檔案，並將其移動。
+    主函式，尋找 old_dir 中與 new_dir 內檔案同名的檔案（忽略大小寫），並將其移動。
     """
     # --- 步驟 1: 建立目標資料夾 ---
     if not os.path.exists(dup_dir):
@@ -16,7 +16,8 @@ def find_and_move_duplicates_by_filename(old_dir, new_dir, dup_dir):
     new_files_filenames = set()
     for root, _, files in os.walk(new_dir):
         for filename in files:
-            new_files_filenames.add(filename)
+            # ★ 修改點：將檔名轉成小寫再加入集合，以忽略大小寫
+            new_files_filenames.add(filename.lower())
     print(f"完成掃描。在新資料夾中找到 {len(new_files_filenames)} 個獨特的檔名。")
 
     # --- 步驟 3: 掃描舊資料夾，比對檔名並移動 ---
@@ -32,8 +33,9 @@ def find_and_move_duplicates_by_filename(old_dir, new_dir, dup_dir):
             processed_count += 1
             file_path = os.path.join(root, filename)
             
-            # 核心邏輯：檢查檔名是否存在於新資料夾的檔名集合中
-            if filename in new_files_filenames:
+            # ★ 修改點：比對時，也將檔名轉成小寫
+            # 核心邏輯：檢查檔名的小寫版本是否存在於新資料夾的檔名集合中
+            if filename.lower() in new_files_filenames:
                 # 計算檔案在 old_dir 中的相對路徑
                 relative_subdir = os.path.relpath(root, old_dir)
 
@@ -86,7 +88,7 @@ if __name__ == "__main__":
         print(f"錯誤: 新資料夾路徑不存在或不是一個資料夾 -> {new_folder}")
         sys.exit(1)
 
-    print("--- 檔案同名比對與移動工具 ---")
+    print("--- 檔案同名比對與移動工具 (忽略大小寫) ---")
     print(f"舊資料夾 (來源): {old_folder}")
     print(f"新資料夾 (比對目標): {new_folder}")
     
