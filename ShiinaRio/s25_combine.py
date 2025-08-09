@@ -44,10 +44,11 @@ def composite_high_quality(background_img, foreground_img, position):
 
     return Image.fromarray(final_np_uint8, 'RGBA')
 
-# --- 動態檢測資料處理函式 (維持不變) ---
+# --- 動態檢測資料處理函式 (已修正) ---
 def prepare_data(csv_path):
     """
     讀取CSV並動態識別「手」與「配件」圖層。
+    已修正為可處理任意數量的底線。
     """
     try:
         df = pd.read_csv(csv_path)
@@ -58,9 +59,12 @@ def prepare_data(csv_path):
     character_data = defaultdict(lambda: {
         'body': None, 'blush': None, 'expressions': [], 'hands': [], 'accessories': []
     })
-    get_id = lambda name: int(name.split('_')[1])
+    
+    # --- 修正：改用 rsplit 確保取得最後一個底線後的數字 ---
+    get_id = lambda name: int(name.rsplit('_', 1)[-1])
 
-    df['character_id'] = df['frame_index'].apply(lambda x: x.split('_')[0])
+    # --- 修正：改用 rsplit 確保取得最後一個底線前的所有部分 ---
+    df['character_id'] = df['frame_index'].apply(lambda x: x.rsplit('_', 1)[0])
 
     for char_id, group in df.groupby('character_id'):
         dynamic_layers = group[group['frame_index'].apply(get_id) >= 400]
@@ -74,7 +78,8 @@ def prepare_data(csv_path):
         
         for _, row in group.iterrows():
             part_info = row.to_dict()
-            part_code_str = row['frame_index'].split('_')[1]
+            # --- 修正：改用 rsplit 確保取得最後一個底線後的數字 ---
+            part_code_str = row['frame_index'].rsplit('_', 1)[-1]
 
             if part_code_str.startswith(hand_prefix):
                 character_data[char_id]['hands'].append(part_info)
@@ -90,10 +95,10 @@ def prepare_data(csv_path):
 
     return dict(character_data)
 
-# --- 主合成函式 (已修正錯誤) ---
+# --- 主合成函式 (已修正) ---
 def combine_character_sprites(character_id, parts_info, image_folder, output_folder):
     """
-    主合成函式，已修正 'unhashable type: dict' 錯誤。
+    主合成函式，已修正檔名解析邏輯。
     """
     body = parts_info.get('body')
     blush = parts_info.get('blush')
@@ -113,9 +118,10 @@ def combine_character_sprites(character_id, parts_info, image_folder, output_fol
     for hand in hands:
         for accessory in accessories_to_loop:
             for expression in expressions:
-                hand_id = hand['frame_index'].split('_')[1]
-                exp_id = expression['frame_index'].split('_')[1]
-                accessory_id = accessory['frame_index'].split('_')[1] if accessory else None
+                # --- 修正：改用 rsplit 確保取得最後一個底線後的數字 ---
+                hand_id = hand['frame_index'].rsplit('_', 1)[-1]
+                exp_id = expression['frame_index'].rsplit('_', 1)[-1]
+                accessory_id = accessory['frame_index'].rsplit('_', 1)[-1] if accessory else None
 
                 fname_parts_base = [character_id, hand_id, exp_id]
                 if accessory_id: fname_parts_base.append(accessory_id)
@@ -123,7 +129,8 @@ def combine_character_sprites(character_id, parts_info, image_folder, output_fol
                 output_path_base = os.path.join(output_folder, output_filename_base)
                 
                 if blush:
-                    blush_id = blush['frame_index'].split('_')[1]
+                    # --- 修正：改用 rsplit 確保取得最後一個底線後的數字 ---
+                    blush_id = blush['frame_index'].rsplit('_', 1)[-1]
                     fname_parts_blush = [character_id, hand_id, blush_id, exp_id]
                     if accessory_id: fname_parts_blush.append(accessory_id)
                     output_filename_blush = "_".join(fname_parts_blush) + ".png"
@@ -137,9 +144,6 @@ def combine_character_sprites(character_id, parts_info, image_folder, output_fol
                     layers_with_blush = [body, hand, blush, expression]
                     if accessory: layers_with_blush.append(accessory)
 
-                # --- 關鍵修正：修復 'unhashable type: dict' 錯誤 ---
-                # 舊的錯誤方法: all_possible_parts = list(dict.fromkeys(layers_no_blush + layers_with_blush))
-                # 新的正確方法：透過 frame_index 來建立唯一的部件字典
                 combined_layers = layers_no_blush + layers_with_blush
                 unique_parts_map = {}
                 for part in combined_layers:
