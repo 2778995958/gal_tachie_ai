@@ -9,19 +9,33 @@ import tqdm
 
 # ==============================================================================
 # --- 設定區 ---
+# 你可以在這裡修改所有參數
 # ==============================================================================
 
 MAX_WORKERS = os.cpu_count()
 INPUT_ROOT = "fg"
 OUTPUT_ROOT = "output"
+
+# 1. 【新設定】表情使用的編號「範圍」
+#    只有在此範圍內的檔案會被視為表情。
+FACE_SUFFIX_START = 1
+FACE_SUFFIX_END = 80
+
+# 2. 特別配件設定 (支援多種)
 SPECIAL_ACCESSORIES = {
-    "kao": [90, 91],
-    "syu": [90],
+    "mio": [90, 91],
+    "sui": [91],
     "yok": [99]
 }
+
+# 3. 臉紅效果使用的編號「範圍」
 BLUSH_SUFFIX_START = 81
 BLUSH_SUFFIX_END = 82
-ACCESSORY_SUFFIX_START = 100
+
+# 4. (一般)配件使用的「起始」編號
+ACCESSORY_SUFFIX_START = 99
+
+# 5. 角色內部的資料夾處理優先級順序
 PROCESSING_ORDER = ["z2", "z1", "no", "bc", "fa"]
 
 # ==============================================================================
@@ -76,28 +90,23 @@ def composite_images(base_image, overlay_path, base_coords):
     except Exception:
         return base_image
 
-# 【優化】工人函式現在會先檢查檔案是否存在，再決定是否進行合成
 def process_single_combination(args):
     body_path, face_path, body_coords, final_blush_path, special_accessory_paths, regular_accessory_paths, output_dir = args
     
-    # --- 步驟 1: 預先計算所有可能的輸出檔名 ---
     body_basename = os.path.splitext(os.path.basename(body_path))[0]
     face_concept_key = os.path.splitext(os.path.basename(face_path))[0]
     special_acc_tags = [os.path.splitext(os.path.basename(p))[0] for p in special_accessory_paths]
     special_acc_suffix = f"_{'_'.join(special_acc_tags)}" if special_acc_tags else ""
-
-    # 無臉紅分支的檔名
+    
     base_filename_no_blush = f"{body_basename}_{face_concept_key}{special_acc_suffix}.png"
     base_filepath_no_blush = os.path.join(output_dir, base_filename_no_blush)
     
-    # 有臉紅分支的檔名
     base_filepath_with_blush = None
     if final_blush_path:
         blush_tag = f"_{os.path.splitext(os.path.basename(final_blush_path))[0]}"
         base_filename_with_blush = f"{body_basename}_{face_concept_key}{blush_tag}{special_acc_suffix}.png"
         base_filepath_with_blush = os.path.join(output_dir, base_filename_with_blush)
 
-    # --- 步驟 2: 建立一個 "待辦事項" 清單 ---
     tasks = {}
     if not os.path.exists(base_filepath_no_blush):
         tasks['base_no_blush'] = base_filepath_no_blush
@@ -116,23 +125,18 @@ def process_single_combination(args):
             if not os.path.exists(acc_filepath):
                 tasks[f'acc_with_blush_{r_acc_tag}'] = (acc_filepath, r_acc_path)
 
-    # --- 步驟 3: 如果待辦清單是空的，直接跳過此任務 ---
     if not tasks:
-        # print(f"  - INFO: ({os.path.basename(body_path)}, {os.path.basename(face_path)}) 的所有組合已存在，跳過。")
         return True
 
-    # --- 步驟 4: 按需生成圖片 ---
     try:
         base_no_blush_img, base_with_blush_img = None, None
 
-        # 如果任何無臉紅的圖片需要生成，則準備無臉紅基礎圖
         if any(k.startswith('base_no_blush') or k.startswith('acc_no_blush') for k in tasks):
             with Image.open(body_path).convert("RGBA") as body_img:
                 base_no_blush_img = composite_images(body_img, face_path, body_coords)
                 for sp_acc_path in special_accessory_paths:
                     base_no_blush_img = composite_images(base_no_blush_img, sp_acc_path, body_coords)
         
-        # 如果任何有臉紅的圖片需要生成，則準備有臉紅基礎圖
         if any(k.startswith('base_with_blush') or k.startswith('acc_with_blush') for k in tasks):
             with Image.open(body_path).convert("RGBA") as body_img:
                 temp_blush_base = composite_images(body_img, final_blush_path, body_coords)
@@ -140,7 +144,6 @@ def process_single_combination(args):
                 for sp_acc_path in special_accessory_paths:
                     base_with_blush_img = composite_images(base_with_blush_img, sp_acc_path, body_coords)
         
-        # 根據待辦清單，儲存需要的圖片
         if 'base_no_blush' in tasks and base_no_blush_img:
             base_no_blush_img.save(tasks['base_no_blush'])
         
@@ -174,16 +177,25 @@ def prepare_jobs_from_directory(current_dir, character_name):
 
     for filename in files_in_dir:
         body_match = body_pattern.match(filename)
-        if body_match: groups[body_match.group(2)]['body'].append(filename)
-        else:
-            face_match = face_pattern.match(filename)
-            if face_match:
-                group_key, number_str = face_match.groups()
-                number = int(number_str)
-                if special_acc_nums and number in special_acc_nums: groups[group_key]['special_accessories'].append(filename)
-                elif BLUSH_SUFFIX_START <= number <= BLUSH_SUFFIX_END: groups[group_key]['blush'].append(filename)
-                elif number >= ACCESSORY_SUFFIX_START: groups[group_key]['accessories'].append(filename)
-                else: groups[group_key]['face'].append(filename)
+        if body_match:
+            groups[body_match.group(2)]['body'].append(filename)
+            continue
+        
+        face_match = face_pattern.match(filename)
+        if face_match:
+            group_key, number_str = face_match.groups()
+            number = int(number_str)
+            
+            # 【修改】修正後的檔案分類邏輯，更加嚴謹
+            if special_acc_nums and number in special_acc_nums:
+                groups[group_key]['special_accessories'].append(filename)
+            elif BLUSH_SUFFIX_START <= number <= BLUSH_SUFFIX_END:
+                groups[group_key]['blush'].append(filename)
+            elif number >= ACCESSORY_SUFFIX_START:
+                groups[group_key]['accessories'].append(filename)
+            elif FACE_SUFFIX_START <= number <= FACE_SUFFIX_END:
+                groups[group_key]['face'].append(filename)
+            # 如果數字不屬於以上任何範圍，則會被忽略
 
     for group_key, parts in groups.items():
         if not parts['body'] or not parts['face']: continue
@@ -220,7 +232,7 @@ def main():
     try:
         character_dirs = [d for d in os.listdir(INPUT_ROOT) if os.path.isdir(os.path.join(INPUT_ROOT, d))]
     except FileNotFoundError:
-        print(f"錯誤：找不到輸入資料夾 '{INPUT_ROOT}'。")
+        print(f"錯誤：找不到輸入資料聞 '{INPUT_ROOT}'。")
         return
 
     all_jobs = []
