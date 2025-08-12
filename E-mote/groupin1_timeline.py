@@ -5,24 +5,27 @@ import os
 def merge_timelines(input_path):
     """
     將包含多個時間軸的 JSON 檔案合併為單一的連續時間軸 JSON 檔案。
+    套用規則：將來源的第0格，用於輸出的第0和第1格，並在結尾添加結束標記。
+    lastTime 固定為 -1。
 
     Args:
-        input_path (str): 輸入的 JSON 檔案路徑 (例如 '1.json')。
+        input_path (str): 輸入的 JSON 檔案路徑。
 
     Returns:
         bool: 如果成功轉換則返回 True，否則返回 False。
     """
     # --- 1. 讀取並驗證輸入檔案 ---
+    print(f"開始處理檔案：'{input_path}'")
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
         if 'id' not in data or 'value' not in data or not isinstance(data['value'], list):
-            print(f"錯誤：輸入檔案 '{input_path}' 的格式不正確。它應該包含一個 'value' 列表。")
+            print(f"錯誤：輸入檔案 '{input_path}' 的格式不正確。")
             return False
 
-        source_timelines = data['value']
-        if not source_timelines:
+        original_timelines = data['value']
+        if not original_timelines:
             print(f"錯誤：輸入檔案 '{input_path}' 的 'value' 列表是空的。")
             return False
 
@@ -36,45 +39,54 @@ def merge_timelines(input_path):
         print(f"讀取檔案時發生未預期的錯誤：{e}")
         return False
 
-    # ------------------- 修正點在這裡 -------------------
-    #  原本錯誤的 'input_psth' 已被更正為 'input_path'
-    print(f"成功讀取檔案 '{input_path}'，發現 {len(source_timelines)} 個時間軸。")
-    # ---------------------------------------------------
-
-    # --- 2. 準備合併資料 ---
-    num_timelines = len(source_timelines)
+    # --- 2. 根據規則建立處理列表：將第0格複製一份放到最前面 ---
+    processed_timelines = [original_timelines[0]] + original_timelines
     
+    num_frames = len(processed_timelines)
+    print(f"成功讀取檔案，發現 {len(original_timelines)} 個獨立時間軸。")
+    print(f"套用規則後，將處理並產生 {num_frames} 個影格 (第0格重複一次)。")
+
+    # --- 3. 準備合併資料 ---
     all_labels = set()
-    for timeline in source_timelines:
+    for timeline in original_timelines:
         for variable in timeline.get('variableList', []):
-            all_labels.add(variable['label'])
+            if 'label' in variable:
+                all_labels.add(variable['label'])
 
-    merged_variables_data = {label: [] for label in sorted(list(all_labels))}
+    sorted_labels = sorted(list(all_labels))
+    merged_variables_data = {label: [] for label in sorted_labels}
 
-    # --- 3. 遍歷並合併時間軸 ---
-    for time_index, timeline in enumerate(source_timelines):
+    # --- 4. 核心轉換邏輯 ---
+    for time_index, timeline in enumerate(processed_timelines):
         variables_in_timeline = {
             var['label']: var.get('frameList', []) 
-            for var in timeline.get('variableList', [])
+            for var in timeline.get('variableList', []) if 'label' in var
         }
 
-        for label in merged_variables_data.keys():
+        for label in sorted_labels:
+            source_frame_data = None
             if label in variables_in_timeline and variables_in_timeline[label]:
-                source_frame = variables_in_timeline[label][0]
-                
+                source_frame_data = variables_in_timeline[label][0]
                 new_frame = {
                     "time": time_index,
-                    "content": source_frame.get('content'),
-                    "type": source_frame.get('type')
+                    "content": source_frame_data.get('content'),
+                    "type": source_frame_data.get('type')
                 }
-                merged_variables_data[label].append(new_frame)
+            else:
+                new_frame = {
+                    "time": time_index,
+                    "content": {"value": 0, "easing": 0},
+                    "type": 2
+                }
+            
+            merged_variables_data[label].append(new_frame)
 
-    # --- 4. 建立最終的輸出結構 ---
+    # --- 5. 建立最終的輸出結構 ---
     final_variable_list = []
     for label, frame_list in merged_variables_data.items():
         if frame_list:
             frame_list.append({
-                "time": num_timelines,
+                "time": num_frames,
                 "content": None,
                 "type": 0
             })
@@ -85,15 +97,18 @@ def merge_timelines(input_path):
         "value": {
             "loopBegin": -1,
             "loopEnd": -1,
-            "lastTime": num_timelines,
+            # 【修正關鍵】根據您的要求，將 lastTime 固定為 -1
+            "lastTime": -1,
             "variableList": final_variable_list,
-            "diff": source_timelines[0].get('diff', 0),
-            "label": source_timelines[0].get('label', 'merged_timeline')
+            "diff": original_timelines[0].get('diff', 0), 
+            "label": "merged_timeline"
         }
     }
 
-    # --- 5. 寫入新的 JSON 檔案 ---
-    output_path = os.path.splitext(input_path)[0] + '_converted.json'
+    # --- 6. 寫入新的 JSON 檔案 ---
+    base_name = os.path.splitext(input_path)[0]
+    output_path = f"{base_name}_converted.json"
+    
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, ensure_ascii=False, indent=1)
@@ -107,9 +122,8 @@ def merge_timelines(input_path):
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         input_file_path = sys.argv[1]
-        print(f"正在處理檔案：{input_file_path}")
         merge_timelines(input_file_path)
     else:
-        print("請將要轉換的 JSON 檔案拖曳到這個 .py 檔案的圖示上。")
+        print("使用方式：請將要轉換的 JSON 檔案拖曳到這個 .py 檔案的圖示上。")
     
     os.system("pause")
