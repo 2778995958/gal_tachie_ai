@@ -135,4 +135,5 @@ if __name__ == '__main__':
         sys.exit(1)
         
     dat_filename = sys.argv[1]
+
     parse_visual_dat(dat_filename)
