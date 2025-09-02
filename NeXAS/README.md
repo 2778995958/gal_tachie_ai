@@ -1,6 +1,9 @@
 cg
+
 拆confin裡的visual.dat，拖進去parse_visual_dat_csv.py，拿到visual.csv
+
 拆visual放在images資料夾
+
 運行cg合圖parse_visual_images.py
 
 
