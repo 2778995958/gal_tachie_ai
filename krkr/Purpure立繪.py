@@ -52,6 +52,7 @@ def load_layer_data_with_paths(filepath):
         df['full_path'] = df['layer_id'].map(paths)
         df['full_path'] = df['full_path'].fillna(df['name'])
         print("[INFO] 完整路徑建立完成。")
+        print(df['full_path'].to_list())
         return df
     except Exception as e:
         print(f"[錯誤] 處理 '{filepath}' 時發生問題: {e}")
@@ -60,6 +61,13 @@ def load_layer_data_with_paths(filepath):
 def load_sinfo_data_manual(filepath):
     print(f"[INFO] 正在解析 '{filepath}'...")
     rules = []
+
+    # --- 【最終修正】建立一個嚴格的路徑清理輔助函式 ---
+    def clean_path(p):
+        # 分割路徑、清除每個部分的頭尾空格、再重新組合
+        # 這能處理 " 私服 / ベース " 這種情況
+        return "/".join(component.strip() for component in p.split('/'))
+
     try:
         with open(filepath, 'r', encoding='utf-8', newline='') as f:
             reader = csv.reader(f, delimiter='\t')
@@ -68,18 +76,26 @@ def load_sinfo_data_manual(filepath):
                 rule_type = row[0].strip()
 
                 if rule_type == 'dress':
-                    rules.append({'type': 'dress', 'data': row})
+                    # 在解析 dress 規則時就帶入清理過的 row data
+                    cleaned_row = [item.strip() for item in row]
+                    rules.append({'type': 'dress', 'data': cleaned_row})
+
                 elif rule_type == 'face':
-                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': row[3].strip()})
+                    # 對路徑進行清理
+                    face_path = clean_path(row[3])
+                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': face_path})
+
                 elif rule_type == 'facegroup':
                      if len(row) >= 2:
                         rules.append({'type': 'facegroup', 'group_name': row[1].strip()})
+
                 elif rule_type == 'fgname':
                     if len(row) >= 2:
                         part_name = row[1].strip()
-                        # 【升級】如果沒有第3個元素，路徑就設為空字串
-                        part_path = row[2].strip() if len(row) >= 3 else ""
+                        # 對路徑進行清理
+                        part_path = clean_path(row[2]) if len(row) >= 3 else ""
                         rules.append({'type': 'fgname', 'name': part_name, 'path': part_path})
+
                 elif rule_type == 'fgalias':
                     if len(row) >= 3:
                         alias_name = row[1].strip()
@@ -93,30 +109,43 @@ def load_sinfo_data_manual(filepath):
         return []
 
 # --- 2. 影像合成核心邏輯 ---
-def create_composite_image_relative(existing_layers_info, output_path, log_file):
-    if not existing_layers_info: return False
+def create_composite_image_relative(layers_to_draw, base_info, output_path, log_file):
+    if not layers_to_draw: return False
     try:
         char_base_name = os.path.basename(os.path.dirname(output_path))
-        base_info = existing_layers_info[0]
+        
+        # --- 【最終修正】使用傳入的、固定的 base_info 作為座標基準 ---
         base_x, base_y = base_info['left'], base_info['top']
-        min_x, min_y, max_x, max_y = 0, 0, base_info['width'], base_info['height']
-        for part_info in existing_layers_info[1:]:
+        
+        # 根據所有需要繪製的圖層計算畫布大小
+        first_part_info = layers_to_draw[0]
+        min_x = first_part_info['left'] - base_x
+        min_y = first_part_info['top'] - base_y
+        max_x = min_x + first_part_info['width']
+        max_y = min_y + first_part_info['height']
+
+        for part_info in layers_to_draw[1:]:
             dx, dy = part_info['left'] - base_x, part_info['top'] - base_y
             min_x, min_y = min(min_x, dx), min(min_y, dy)
             max_x, max_y = max(max_x, dx + part_info['width']), max(max_y, dy + part_info['height'])
+        
         master_canvas = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
-        for part_info in existing_layers_info:
+
+        # 按照排序好的列表 (layers_to_draw) 進行繪製
+        for part_info in layers_to_draw:
             part_img_path = os.path.join(char_base_name, f"{char_base_name}_{part_info['layer_id']}.png")
             part_img = Image.open(part_img_path).convert("RGBA")
+            
             part_opacity = part_info.get('opacity', 255)
             if part_opacity < 255:
-                if part_img.mode != 'RGBA': part_img = part_img.convert('RGBA')
                 alpha = part_img.getchannel('A').point(lambda p: p * (part_opacity / 255.0))
                 part_img.putalpha(alpha)
-            paste_x, paste_y = (part_info['left'] - base_x) - min_x, (part_info['top'] - base_y) - min_y
-            temp_layer = Image.new("RGBA", master_canvas.size, (0, 0, 0, 0))
-            temp_layer.paste(part_img, (paste_x, paste_y))
-            master_canvas = Image.alpha_composite(master_canvas, temp_layer)
+
+            paste_x = (part_info['left'] - base_x) - min_x
+            paste_y = (part_info['top'] - base_y) - min_y
+            
+            master_canvas.paste(part_img, (paste_x, paste_y), part_img)
+
         master_canvas.save(output_path)
         print(f"  ✅ 已儲存: {output_path}")
         return True
@@ -292,7 +321,6 @@ def matches_condition(dress_name, condition):
     return not match if is_negated else match
 
 def process_face_combinations(face_rule_dict, base_layers, priority_overlays, final_overlays, path_to_id, id_to_path, layer_df, char_base_name, dress_info_str, generated_filenames_set, log_file, output_folder):
-    # 【更新】建立一個集合，用於快速識別哪些 ID 屬於 dress
     dress_id_set = {lid for lid in (base_layers + priority_overlays + final_overlays) if lid is not None}
 
     for face_name, face_paths in face_rule_dict.items():
@@ -310,54 +338,48 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
             print(f"  ⏭️  跳過組合: {face_name} (Sinfo 中定義的路徑錯誤)")
             continue
 
-        sorted_face_paths = sorted(face_paths, key=lambda p: p.count('/'), reverse=True)
-        sorted_face_layers = [path_to_id.get(p) for p in sorted_face_paths]
-        final_layers = base_layers + sorted_face_layers + priority_overlays + final_overlays
+        all_needed_ids = set(face_layers + base_layers + priority_overlays + final_overlays)
+        all_needed_ids.discard(None)
         
-        existing_layers_info, missing_parts_log = [], []
-        for lid in final_layers:
-            if lid is None: continue
-            info_row = layer_df[layer_df['layer_id'] == lid]
-            if not info_row.empty:
-                info = info_row.iloc[0].to_dict()
+        filtered_df = layer_df[layer_df['layer_id'].isin(all_needed_ids)].copy()
+        
+        missing_parts_log = []
+        all_ids_in_filtered_df = set(filtered_df['layer_id'])
+
+        for lid in all_needed_ids:
+            if lid in all_ids_in_filtered_df:
                 img_path = os.path.join(char_base_name, f"{char_base_name}_{lid}.png")
-                if os.path.exists(img_path):
-                    existing_layers_info.append(info)
-                else:
+                if not os.path.exists(img_path):
                     missing_parts_log.append(f"'{id_to_path.get(lid, '未知')}'({lid})")
+            else:
+                 missing_parts_log.append(f"'未知圖層'({lid})")
         
         if missing_parts_log:
             log_file.write(f"[組合跳過] {combination_context}: 因缺少以下必要部件檔案，此組合已跳過: {', '.join(missing_parts_log)}\n")
             print(f"  ⏭️  跳過組合: {face_name} (缺少 {len(missing_parts_log)} 個 .png 檔案)")
             continue
+        
+        layers_to_process = filtered_df.to_dict('records')
 
-        if not existing_layers_info or (base_layers and existing_layers_info[0].get('layer_id') != base_layers[0]):
-            if base_layers and base_layers[0] is not None:
-                log_file.write(f"[基礎檔案缺失] {combination_context}: 基礎圖層 '{id_to_path.get(base_layers[0], '未知')}'({base_layers[0]}) 的圖片不存在，組合跳過。\n")
-            elif not base_layers:
-                 log_file.write(f"[基礎檔案缺失] {combination_context}: 服裝未定義任何基礎圖層，組合跳過。\n")
+        if not layers_to_process:
             continue
         
-        # --- 【更新】使用新的排序邏輯來生成檔名 ---
-        # 1. 提取所有實際會用到的圖層 ID
-        final_used_ids = [info['layer_id'] for info in existing_layers_info]
+        # --- 【最終修正】邏輯重構 ---
+        # 1. 明確找出定位基準圖層 (通常是身體)
+        base_layer_id = base_layers[0] if base_layers else layers_to_process[0]['layer_id']
+        base_info_for_coords = next((item for item in layers_to_process if item['layer_id'] == base_layer_id), layers_to_process[0])
+
+        # 2. 嚴格按照圖層的垂直(top)座標進行排序，以確立正確的繪製順序
+        #    top 座標值越大 (越靠下) 的圖層排在越前面，會被先畫
+        layers_to_draw = sorted(layers_to_process, key=lambda x: x['top'])
         
-        # 2. 將 ID 分為 'dress' 和 '其他' (表情等) 兩組
-        dress_part_ids = []
-        other_part_ids = []
-        for lid in final_used_ids:
-            if lid in dress_id_set:
-                dress_part_ids.append(lid)
-            else:
-                other_part_ids.append(lid)
-        
-        # 3. 分別對兩組 ID 進行排序，然後合併，確保 dress ID 在前
+        # 檔名生成
+        final_used_ids = [info['layer_id'] for info in layers_to_draw]
+        dress_part_ids = [lid for lid in final_used_ids if lid in dress_id_set]
+        other_part_ids = [lid for lid in final_used_ids if lid not in dress_id_set]
         final_sorted_ids = sorted(list(set(dress_part_ids))) + sorted(list(set(other_part_ids)))
-        
-        # 4. 組合成字串並構成最終檔名
         id_string = "_".join(map(str, final_sorted_ids))
         output_filename = f"{char_base_name}_{id_string}.png"
-
 
         if output_filename in generated_filenames_set:
             log_file.write(f"[檔名重複] {combination_context}: 跳過已存在的檔案 '{output_filename}'。\n")
@@ -367,7 +389,8 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
         if not os.path.exists(char_output_folder): os.makedirs(char_output_folder)
         output_path = os.path.join(char_output_folder, output_filename)
         
-        if create_composite_image_relative(existing_layers_info, output_path, log_file):
+        # 將排序好的圖層列表 和 定位基準 分別傳入
+        if create_composite_image_relative(layers_to_draw, base_info_for_coords, output_path, log_file):
             generated_filenames_set.add(output_filename)
             log_file.write(f"[成功生成] {combination_context}: 已儲存為 '{output_filename}'\n")
 
