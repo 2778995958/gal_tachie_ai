@@ -52,7 +52,6 @@ def load_layer_data_with_paths(filepath):
         df['full_path'] = df['layer_id'].map(paths)
         df['full_path'] = df['full_path'].fillna(df['name'])
         print("[INFO] 完整路徑建立完成。")
-        print(df['full_path'].to_list())
         return df
     except Exception as e:
         print(f"[錯誤] 處理 '{filepath}' 時發生問題: {e}")
@@ -61,13 +60,6 @@ def load_layer_data_with_paths(filepath):
 def load_sinfo_data_manual(filepath):
     print(f"[INFO] 正在解析 '{filepath}'...")
     rules = []
-
-    # --- 【最終修正】建立一個嚴格的路徑清理輔助函式 ---
-    def clean_path(p):
-        # 分割路徑、清除每個部分的頭尾空格、再重新組合
-        # 這能處理 " 私服 / ベース " 這種情況
-        return "/".join(component.strip() for component in p.split('/'))
-
     try:
         with open(filepath, 'r', encoding='utf-8', newline='') as f:
             reader = csv.reader(f, delimiter='\t')
@@ -76,26 +68,18 @@ def load_sinfo_data_manual(filepath):
                 rule_type = row[0].strip()
 
                 if rule_type == 'dress':
-                    # 在解析 dress 規則時就帶入清理過的 row data
-                    cleaned_row = [item.strip() for item in row]
-                    rules.append({'type': 'dress', 'data': cleaned_row})
-
+                    rules.append({'type': 'dress', 'data': row})
                 elif rule_type == 'face':
-                    # 對路徑進行清理
-                    face_path = clean_path(row[3])
-                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': face_path})
-
+                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': row[3].strip()})
                 elif rule_type == 'facegroup':
                      if len(row) >= 2:
                         rules.append({'type': 'facegroup', 'group_name': row[1].strip()})
-
                 elif rule_type == 'fgname':
                     if len(row) >= 2:
                         part_name = row[1].strip()
-                        # 對路徑進行清理
-                        part_path = clean_path(row[2]) if len(row) >= 3 else ""
+                        # 【升級】如果沒有第3個元素，路徑就設為空字串
+                        part_path = row[2].strip() if len(row) >= 3 else ""
                         rules.append({'type': 'fgname', 'name': part_name, 'path': part_path})
-
                 elif rule_type == 'fgalias':
                     if len(row) >= 3:
                         alias_name = row[1].strip()
@@ -109,43 +93,30 @@ def load_sinfo_data_manual(filepath):
         return []
 
 # --- 2. 影像合成核心邏輯 ---
-def create_composite_image_relative(layers_to_draw, base_info, output_path, log_file):
-    if not layers_to_draw: return False
+def create_composite_image_relative(existing_layers_info, output_path, log_file):
+    if not existing_layers_info: return False
     try:
         char_base_name = os.path.basename(os.path.dirname(output_path))
-        
-        # --- 【最終修正】使用傳入的、固定的 base_info 作為座標基準 ---
+        base_info = existing_layers_info[0]
         base_x, base_y = base_info['left'], base_info['top']
-        
-        # 根據所有需要繪製的圖層計算畫布大小
-        first_part_info = layers_to_draw[0]
-        min_x = first_part_info['left'] - base_x
-        min_y = first_part_info['top'] - base_y
-        max_x = min_x + first_part_info['width']
-        max_y = min_y + first_part_info['height']
-
-        for part_info in layers_to_draw[1:]:
+        min_x, min_y, max_x, max_y = 0, 0, base_info['width'], base_info['height']
+        for part_info in existing_layers_info[1:]:
             dx, dy = part_info['left'] - base_x, part_info['top'] - base_y
             min_x, min_y = min(min_x, dx), min(min_y, dy)
             max_x, max_y = max(max_x, dx + part_info['width']), max(max_y, dy + part_info['height'])
-        
         master_canvas = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
-
-        # 按照排序好的列表 (layers_to_draw) 進行繪製
-        for part_info in layers_to_draw:
+        for part_info in existing_layers_info:
             part_img_path = os.path.join(char_base_name, f"{char_base_name}_{part_info['layer_id']}.png")
             part_img = Image.open(part_img_path).convert("RGBA")
-            
             part_opacity = part_info.get('opacity', 255)
             if part_opacity < 255:
+                if part_img.mode != 'RGBA': part_img = part_img.convert('RGBA')
                 alpha = part_img.getchannel('A').point(lambda p: p * (part_opacity / 255.0))
                 part_img.putalpha(alpha)
-
-            paste_x = (part_info['left'] - base_x) - min_x
-            paste_y = (part_info['top'] - base_y) - min_y
-            
-            master_canvas.paste(part_img, (paste_x, paste_y), part_img)
-
+            paste_x, paste_y = (part_info['left'] - base_x) - min_x, (part_info['top'] - base_y) - min_y
+            temp_layer = Image.new("RGBA", master_canvas.size, (0, 0, 0, 0))
+            temp_layer.paste(part_img, (paste_x, paste_y))
+            master_canvas = Image.alpha_composite(master_canvas, temp_layer)
         master_canvas.save(output_path)
         print(f"  ✅ 已儲存: {output_path}")
         return True
@@ -321,6 +292,7 @@ def matches_condition(dress_name, condition):
     return not match if is_negated else match
 
 def process_face_combinations(face_rule_dict, base_layers, priority_overlays, final_overlays, path_to_id, id_to_path, layer_df, char_base_name, dress_info_str, generated_filenames_set, log_file, output_folder):
+    # 建立一個集合，用於快速識別哪些 ID 屬於 dress
     dress_id_set = {lid for lid in (base_layers + priority_overlays + final_overlays) if lid is not None}
 
     for face_name, face_paths in face_rule_dict.items():
@@ -338,11 +310,17 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
             print(f"  ⏭️  跳過組合: {face_name} (Sinfo 中定義的路徑錯誤)")
             continue
 
+        # --- 【核心修正】 ---
+        # 1. 收集當前組合需要的所有圖層 ID
         all_needed_ids = set(face_layers + base_layers + priority_overlays + final_overlays)
-        all_needed_ids.discard(None)
-        
+        all_needed_ids.discard(None) # 移除可能存在的 None
+
+        # 2. 根據 ID 集合，從原始的 layer_df 中篩選出圖層。
+        #    DataFrame 的篩選會保留 .txt 檔案中的原始相對順序，作為排序時的次要依據。
         filtered_df = layer_df[layer_df['layer_id'].isin(all_needed_ids)].copy()
-        
+
+        # 3. 檢查對應的 .png 檔案是否存在
+        existing_layers_info = []
         missing_parts_log = []
         all_ids_in_filtered_df = set(filtered_df['layer_id'])
 
@@ -358,28 +336,33 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
             log_file.write(f"[組合跳過] {combination_context}: 因缺少以下必要部件檔案，此組合已跳過: {', '.join(missing_parts_log)}\n")
             print(f"  ⏭️  跳過組合: {face_name} (缺少 {len(missing_parts_log)} 個 .png 檔案)")
             continue
-        
-        layers_to_process = filtered_df.to_dict('records')
 
-        if not layers_to_process:
+        # 如果所有圖片都存在，則將篩選出的圖層資訊轉換為列表
+        existing_layers_info = filtered_df.to_dict('records')
+
+        if not existing_layers_info:
             continue
         
-        # --- 【最終修正】邏輯重構 ---
-        # 1. 明確找出定位基準圖層 (通常是身體)
-        base_layer_id = base_layers[0] if base_layers else layers_to_process[0]['layer_id']
-        base_info_for_coords = next((item for item in layers_to_process if item['layer_id'] == base_layer_id), layers_to_process[0])
-
-        # 2. 嚴格按照圖層的垂直(top)座標進行排序，以確立正確的繪製順序
-        #    top 座標值越大 (越靠下) 的圖層排在越前面，會被先畫
-        layers_to_draw = sorted(layers_to_process, key=lambda x: x['top'])
+        # 4. 【關鍵】嚴格按照圖層的垂直(top)座標進行排序，確立最終繪製順序
+        #    top 座標值越大 (越靠螢幕下方) 的圖層排在越前面，會被最先畫。
+        #    Python 的 sort 是穩定的，top 座標相同的圖層會維持它們在 .txt 中的相對順序。
+        existing_layers_info.sort(key=lambda x: x['top'])
         
-        # 檔名生成
-        final_used_ids = [info['layer_id'] for info in layers_to_draw]
-        dress_part_ids = [lid for lid in final_used_ids if lid in dress_id_set]
-        other_part_ids = [lid for lid in final_used_ids if lid not in dress_id_set]
+        # 5. 生成檔名 (這部分邏輯不變)
+        final_used_ids = [info['layer_id'] for info in existing_layers_info]
+        dress_part_ids = []
+        other_part_ids = []
+        for lid in final_used_ids:
+            if lid in dress_id_set:
+                dress_part_ids.append(lid)
+            else:
+                other_part_ids.append(lid)
+        
         final_sorted_ids = sorted(list(set(dress_part_ids))) + sorted(list(set(other_part_ids)))
+        
         id_string = "_".join(map(str, final_sorted_ids))
         output_filename = f"{char_base_name}_{id_string}.png"
+
 
         if output_filename in generated_filenames_set:
             log_file.write(f"[檔名重複] {combination_context}: 跳過已存在的檔案 '{output_filename}'。\n")
@@ -389,8 +372,7 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
         if not os.path.exists(char_output_folder): os.makedirs(char_output_folder)
         output_path = os.path.join(char_output_folder, output_filename)
         
-        # 將排序好的圖層列表 和 定位基準 分別傳入
-        if create_composite_image_relative(layers_to_draw, base_info_for_coords, output_path, log_file):
+        if create_composite_image_relative(existing_layers_info, output_path, log_file):
             generated_filenames_set.add(output_filename)
             log_file.write(f"[成功生成] {combination_context}: 已儲存為 '{output_filename}'\n")
 
