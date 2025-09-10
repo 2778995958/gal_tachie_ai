@@ -1,4 +1,3 @@
-# 【最終典藏版 Ver. 33.0 - 新增 Facegroup 功能】
 import pandas as pd
 from PIL import Image
 import os
@@ -6,7 +5,7 @@ import csv
 from collections import defaultdict
 import glob
 from datetime import datetime
-import itertools # 匯入用於產生組合的工具
+import itertools
 
 # ==============================================================================
 # --- 使用者設定區 ---
@@ -14,6 +13,12 @@ SPECIAL_UNDERLAY_IDS = {8320, 8321}
 PRIORITY_OVERLAY_PATHS = {'かぶせ 水着'}
 # ==============================================================================
 
+# --- 【修正】將 clean_path 移至頂層，使其成為一個全域可用的輔助函式 ---
+def clean_path(p):
+    """清理路徑字串中可能存在的多餘空格"""
+    if not isinstance(p, str):
+        return ""
+    return "/".join(component.strip() for component in p.split('/'))
 
 # --- 1. 資料讀取與預處理 ---
 def load_layer_data_with_paths(filepath):
@@ -21,7 +26,14 @@ def load_layer_data_with_paths(filepath):
     parsed_data = []
     try:
         with open(filepath, 'r', encoding='utf-8', newline='') as f:
-            next(f); next(f) # Skip headers
+            line1 = next(f, None)
+            if line1 and 'layer_type' not in line1:
+                f.seek(0)
+            else:
+                line2 = next(f, None)
+                if not line2 or line2.strip().startswith('0'):
+                    f.seek(len(line1) if line1 else 0)
+
             reader = csv.reader(f, delimiter='\t')
             for row in reader:
                 if len(row) >= 10 and row[9].strip().isdigit():
@@ -64,21 +76,20 @@ def load_sinfo_data_manual(filepath):
         with open(filepath, 'r', encoding='utf-8', newline='') as f:
             reader = csv.reader(f, delimiter='\t')
             for row in reader:
-                if not row: continue
+                if not row or row[0].strip().startswith('#'): continue
                 rule_type = row[0].strip()
 
                 if rule_type == 'dress':
                     rules.append({'type': 'dress', 'data': row})
                 elif rule_type == 'face':
-                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': row[3].strip()})
+                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': clean_path(row[3])})
                 elif rule_type == 'facegroup':
                      if len(row) >= 2:
                         rules.append({'type': 'facegroup', 'group_name': row[1].strip()})
                 elif rule_type == 'fgname':
                     if len(row) >= 2:
                         part_name = row[1].strip()
-                        # 【升級】如果沒有第3個元素，路徑就設為空字串
-                        part_path = row[2].strip() if len(row) >= 3 else ""
+                        part_path = clean_path(row[2]) if len(row) >= 3 else ""
                         rules.append({'type': 'fgname', 'name': part_name, 'path': part_path})
                 elif rule_type == 'fgalias':
                     if len(row) >= 3:
@@ -99,24 +110,32 @@ def create_composite_image_relative(existing_layers_info, output_path, log_file)
         char_base_name = os.path.basename(os.path.dirname(output_path))
         base_info = existing_layers_info[0]
         base_x, base_y = base_info['left'], base_info['top']
+        
         min_x, min_y, max_x, max_y = 0, 0, base_info['width'], base_info['height']
         for part_info in existing_layers_info[1:]:
             dx, dy = part_info['left'] - base_x, part_info['top'] - base_y
             min_x, min_y = min(min_x, dx), min(min_y, dy)
             max_x, max_y = max(max_x, dx + part_info['width']), max(max_y, dy + part_info['height'])
+        
         master_canvas = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
+
         for part_info in existing_layers_info:
             part_img_path = os.path.join(char_base_name, f"{char_base_name}_{part_info['layer_id']}.png")
             part_img = Image.open(part_img_path).convert("RGBA")
+            
             part_opacity = part_info.get('opacity', 255)
             if part_opacity < 255:
-                if part_img.mode != 'RGBA': part_img = part_img.convert('RGBA')
                 alpha = part_img.getchannel('A').point(lambda p: p * (part_opacity / 255.0))
                 part_img.putalpha(alpha)
-            paste_x, paste_y = (part_info['left'] - base_x) - min_x, (part_info['top'] - base_y) - min_y
+
+            paste_x = (part_info['left'] - base_x) - min_x
+            paste_y = (part_info['top'] - base_y) - min_y
+            
+            # --- 【還原】使用您偏好的 alpha_composite ---
             temp_layer = Image.new("RGBA", master_canvas.size, (0, 0, 0, 0))
             temp_layer.paste(part_img, (paste_x, paste_y))
             master_canvas = Image.alpha_composite(master_canvas, temp_layer)
+
         master_canvas.save(output_path)
         print(f"  ✅ 已儲存: {output_path}")
         return True
@@ -171,55 +190,54 @@ def process_character(txt_path, sinfo_path, log_file):
     path_to_id = pd.Series(layer_df.layer_id.values, index=layer_df.full_path).to_dict()
     id_to_path = {v: k for k, v in path_to_id.items()}
     
-    # --- 規則分類與處理 ---
     face_rules = defaultdict(list)
     conditional_faces = defaultdict(lambda: defaultdict(dict))
     facegroup_order = [r['group_name'] for r in sinfo_rules if r['type'] == 'facegroup']
     fgname_rules = [r for r in sinfo_rules if r['type'] == 'fgname']
     fgalias_rules = [r for r in sinfo_rules if r['type'] == 'fgalias']
     
-    # --- 【最終修正】採用更穩健的三段式邏輯處理 dress 規則 ---
     all_dress_rules_raw = [r['data'] for r in sinfo_rules if r['type'] == 'dress']
     dress_rules = defaultdict(lambda: defaultdict(list))
     dress_bases = {}
 
-    # 1. 第一段：找出所有 base
     for row in all_dress_rules_raw:
         if len(row) >= 4 and row[2].strip() == 'base':
             dress_name = row[1].strip()
-            dress_bases[dress_name] = row[3].strip()
+            dress_bases[dress_name] = clean_path(row[3])
 
-    # 2. 第二段：聚合所有 diff (包括舊格式)
     for row in all_dress_rules_raw:
         dress_name = row[1].strip()
         if len(row) >= 5 and row[2].strip() == 'diff':
             diff_id = row[3].strip()
-            diff_path = row[4].strip()
+            diff_path = clean_path(row[4])
             dress_rules[dress_name][diff_id].append(diff_path)
-        elif len(row) >= 5 and row[2].strip() != 'base': # 兼容舊格式
+        elif len(row) >= 5 and row[2].strip() != 'base':
             diff_id = row[3].strip()
-            diff_path = row[4].strip()
+            diff_path = clean_path(row[4])
             dress_rules[dress_name][diff_id].append(diff_path)
             
-    # 3. 第三段：將 base 添加到對應的 diff 組中
     for dress_name, base_path in dress_bases.items():
         if dress_name in dress_rules:
             for diff_id in dress_rules[dress_name]:
-                # 使用 insert 確保 base 總是在最前面
                 dress_rules[dress_name][diff_id].insert(0, base_path)
-    # --- dress 規則處理結束 ---
-
 
     for rule in [r for r in sinfo_rules if r['type'] == 'face']:
         if '@' in rule['name']:
             face_name, condition = rule['name'].split('@', 1)
-            if condition not in conditional_faces[face_name]: conditional_faces[face_name][condition] = []
             conditional_faces[face_name][condition].append(rule['path'])
         else:
             face_rules[rule['name']].append(rule['path'])
 
+    id_to_facegroup_map = {}
+    for group in facegroup_order:
+        for rule in fgname_rules:
+            if rule['name'].startswith(group):
+                for path in rule.get('paths', [rule.get('path')]): # 處理多路徑fgname
+                    layer_id = path_to_id.get(path)
+                    if layer_id:
+                        id_to_facegroup_map[layer_id] = group
+
     generated_face_rules = {}
-    
     fgname_to_paths_map = defaultdict(list)
     for rule in fgname_rules:
         fgname_to_paths_map[rule['name']].append(rule['path'])
@@ -238,23 +256,7 @@ def process_character(txt_path, sinfo_path, log_file):
             generated_face_rules[alias_name] = combo_paths
     
     elif facegroup_order and fgname_rules:
-        print("[INFO] 未偵測到 fgalias 規則，將自動生成所有可能的表情組合...")
-        part_lists_in_order = []
-        for group in facegroup_order:
-            options_for_group = []
-            for name, paths in fgname_to_paths_map.items():
-                if name.startswith(group):
-                    options_for_group.append((name, paths))
-            if options_for_group:
-                part_lists_in_order.append(options_for_group)
-        
-        if part_lists_in_order:
-            all_combinations = list(itertools.product(*part_lists_in_order))
-            for combo in all_combinations:
-                combo_name = "_".join(part_tuple[0] for part_tuple in combo)
-                combo_paths = [path for part_tuple in combo for path in part_tuple[1] if path]
-                generated_face_rules[combo_name] = combo_paths
-            print(f"[INFO] 已成功生成 {len(generated_face_rules)} 個 facegroup 表情組合。")
+        pass
 
     final_face_rules = generated_face_rules if generated_face_rules else face_rules
     if not final_face_rules:
@@ -266,22 +268,15 @@ def process_character(txt_path, sinfo_path, log_file):
             current_dress_key = f"{dress_name}_{diff_id}"
             print(f"\n--- 正在處理組合: {dress_name} (版本: {diff_id}) ---")
             
-            priority_overlay_ids, other_dress_ids = [], []
-            for p in dress_paths:
-                lid = path_to_id.get(p)
-                if lid is None: continue
-                if p in PRIORITY_OVERLAY_PATHS: priority_overlay_ids.append(lid)
-                else: other_dress_ids.append(lid)
+            # --- 【核心修正】不再拆分 dress 部件，直接將所有 dress parts ID 集合起來 ---
+            all_dress_part_ids = [path_to_id.get(p) for p in dress_paths if path_to_id.get(p) is not None]
             
-            special_dress_parts = [lid for lid in other_dress_ids if lid in SPECIAL_UNDERLAY_IDS]
-            normal_dress_parts = [lid for lid in other_dress_ids if lid not in SPECIAL_UNDERLAY_IDS]
-            base_layers_for_comp, overlay_layers_for_comp = (normal_dress_parts[:1] + special_dress_parts + normal_dress_parts[:1], normal_dress_parts[1:]) if special_dress_parts and normal_dress_parts else (normal_dress_parts[:1], normal_dress_parts[1:])
-            
-            process_face_combinations(final_face_rules, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, id_to_path, layer_df, char_base_name, current_dress_key, generated_filenames_set, log_file, output_folder)
+            # 將完整的服裝部件列表傳遞下去
+            process_face_combinations(final_face_rules, all_dress_part_ids, path_to_id, id_to_path, layer_df, char_base_name, current_dress_key, generated_filenames_set, log_file, output_folder, facegroup_order, id_to_facegroup_map)
             
             for face_name, conditions in conditional_faces.items():
                 if matches_condition(dress_name, condition):
-                    process_face_combinations({face_name: face_paths}, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, id_to_path, layer_df, char_base_name, f"{current_dress_key}@{condition}", generated_filenames_set, log_file, output_folder)
+                    process_face_combinations({face_name: face_paths}, all_dress_part_ids, path_to_id, id_to_path, layer_df, char_base_name, f"{current_dress_key}@{condition}", generated_filenames_set, log_file, output_folder, facegroup_order, id_to_facegroup_map)
 
     print(f"\n{'='*20} 角色: {char_base_name} 處理完成 {'='*20}")
 
@@ -291,78 +286,60 @@ def matches_condition(dress_name, condition):
     match = dress_name.startswith(condition[:-1]) if condition.endswith('*') else (dress_name == condition)
     return not match if is_negated else match
 
-def process_face_combinations(face_rule_dict, base_layers, priority_overlays, final_overlays, path_to_id, id_to_path, layer_df, char_base_name, dress_info_str, generated_filenames_set, log_file, output_folder):
-    # 建立一個集合，用於快速識別哪些 ID 屬於 dress
-    dress_id_set = {lid for lid in (base_layers + priority_overlays + final_overlays) if lid is not None}
-
+def process_face_combinations(face_rule_dict, all_dress_layer_ids, path_to_id, id_to_path, layer_df, char_base_name, dress_info_str, generated_filenames_set, log_file, output_folder, facegroup_order, id_to_facegroup_map):
     for face_name, face_paths in face_rule_dict.items():
         combination_context = f"組合 '{dress_info_str} + {face_name}'"
         
-        face_layers, all_paths_found = [], True
+        face_layer_ids, all_paths_found = [], True
         for p in face_paths:
             lid = path_to_id.get(p)
             if lid is None:
-                log_file.write(f"[路徑查找失敗] {combination_context}: 部件路徑 '{p}' 在 .txt 中找不到。\n")
                 all_paths_found = False
-            face_layers.append(lid)
+            face_layer_ids.append(lid)
         
         if not all_paths_found: 
-            print(f"  ⏭️  跳過組合: {face_name} (Sinfo 中定義的路徑錯誤)")
+            print(f"  ⏭️  跳過組合: {face_name} (Sinfo 中有未定義的路徑)")
             continue
-
-        # --- 【核心修正】 ---
-        # 1. 收集當前組合需要的所有圖層 ID
-        all_needed_ids = set(face_layers + base_layers + priority_overlays + final_overlays)
-        all_needed_ids.discard(None) # 移除可能存在的 None
-
-        # 2. 根據 ID 集合，從原始的 layer_df 中篩選出圖層。
-        #    DataFrame 的篩選會保留 .txt 檔案中的原始相對順序，作為排序時的次要依據。
-        filtered_df = layer_df[layer_df['layer_id'].isin(all_needed_ids)].copy()
-
-        # 3. 檢查對應的 .png 檔案是否存在
-        existing_layers_info = []
-        missing_parts_log = []
-        all_ids_in_filtered_df = set(filtered_df['layer_id'])
-
-        for lid in all_needed_ids:
-            if lid in all_ids_in_filtered_df:
+        
+        group_order_map = {group: i for i, group in enumerate(facegroup_order)}
+        sorted_face_layers = sorted(
+            [lid for lid in face_layer_ids if lid is not None], 
+            key=lambda lid: group_order_map.get(id_to_facegroup_map.get(lid), float('inf'))
+        )
+        
+        # --- 【核心修正】簡化最終圖層列表的組合方式 ---
+        # 確保順序永遠是：所有服裝部件 -> 所有表情部件
+        final_layers_ids = all_dress_layer_ids + sorted_face_layers
+        
+        existing_layers_info, missing_parts_log = [], []
+        for lid in final_layers_ids:
+            if lid is None: continue
+            info_row = layer_df[layer_df['layer_id'] == lid]
+            if not info_row.empty:
+                info = info_row.iloc[0].to_dict()
                 img_path = os.path.join(char_base_name, f"{char_base_name}_{lid}.png")
-                if not os.path.exists(img_path):
+                if os.path.exists(img_path):
+                    existing_layers_info.append(info)
+                else:
                     missing_parts_log.append(f"'{id_to_path.get(lid, '未知')}'({lid})")
             else:
-                 missing_parts_log.append(f"'未知圖層'({lid})")
-        
+                missing_parts_log.append(f"'ID {lid} 在 .txt 中不存在'")
+
         if missing_parts_log:
-            log_file.write(f"[組合跳過] {combination_context}: 因缺少以下必要部件檔案，此組合已跳過: {', '.join(missing_parts_log)}\n")
-            print(f"  ⏭️  跳過組合: {face_name} (缺少 {len(missing_parts_log)} 個 .png 檔案)")
+            log_file.write(f"[組合跳過] {combination_context}: 因缺少以下部件，此組合已跳過: {', '.join(missing_parts_log)}\n")
+            print(f"  ⏭️  跳過組合: {face_name} (缺少 {len(missing_parts_log)} 個部件)")
             continue
-
-        # 如果所有圖片都存在，則將篩選出的圖層資訊轉換為列表
-        existing_layers_info = filtered_df.to_dict('records')
-
+        
         if not existing_layers_info:
             continue
         
-        # 4. 【關鍵】嚴格按照圖層的垂直(top)座標進行排序，確立最終繪製順序
-        #    top 座標值越大 (越靠螢幕下方) 的圖層排在越前面，會被最先畫。
-        #    Python 的 sort 是穩定的，top 座標相同的圖層會維持它們在 .txt 中的相對順序。
-        existing_layers_info.sort(key=lambda x: x['top'])
-        
-        # 5. 生成檔名 (這部分邏輯不變)
+        dress_id_set = set(all_dress_layer_ids)
         final_used_ids = [info['layer_id'] for info in existing_layers_info]
-        dress_part_ids = []
-        other_part_ids = []
-        for lid in final_used_ids:
-            if lid in dress_id_set:
-                dress_part_ids.append(lid)
-            else:
-                other_part_ids.append(lid)
-        
+        dress_part_ids = [lid for lid in final_used_ids if lid in dress_id_set]
+        other_part_ids = [lid for lid in final_used_ids if lid not in dress_id_set]
         final_sorted_ids = sorted(list(set(dress_part_ids))) + sorted(list(set(other_part_ids)))
-        
         id_string = "_".join(map(str, final_sorted_ids))
         output_filename = f"{char_base_name}_{id_string}.png"
-
 
         if output_filename in generated_filenames_set:
             log_file.write(f"[檔名重複] {combination_context}: 跳過已存在的檔案 '{output_filename}'。\n")
