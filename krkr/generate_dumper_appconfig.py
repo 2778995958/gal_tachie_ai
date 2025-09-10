@@ -75,7 +75,7 @@ def generate_tjs_from_txts(input_files):
         print("警告：沒有找到任何可匯出的檔案。")
         return
         
-    with open(output_tjs_path, 'w', encoding='utf-8') as f_out:
+    with open(output_tjs_path, 'w', encoding='utf-16') as f_out:
         f_out.write("// Kirikiri Batch Dumper Script (with .sinfo support)\n")
         f_out.write(f"// Generated from {len(input_files)} file(s).\n\n")
         f_out.write("\n".join(tjs_script_content))
@@ -101,4 +101,5 @@ if __name__ == "__main__":
     else:
         print("請提供要轉換的 .txt 檔案路徑。")
         print("用法 1 (指定多個檔案): python generate_batch_dumper.py file1.txt file2.txt")
+
         print("用法 2 (使用萬用字元): python generate_batch_dumper.py *.txt")
