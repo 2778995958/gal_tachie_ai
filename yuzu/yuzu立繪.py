@@ -1,4 +1,4 @@
-# 【最終典藏版 Ver. 32.0 - 帶素材檢查】
+# 【最終典藏版 Ver. 32.1 - 錯誤修正版】
 import pandas as pd
 from PIL import Image
 import os
@@ -19,7 +19,7 @@ def load_layer_data_with_paths(filepath):
     print(f"[INFO] 正在解析 '{filepath}'...")
     parsed_data = []
     try:
-        with open(filepath, 'r', encoding='utf-16', newline='') as f:
+        with open(filepath, 'r', encoding='utf-8', newline='') as f:
             next(f); next(f) # Skip headers
             reader = csv.reader(f, delimiter='\t')
             for row in reader:
@@ -43,13 +43,16 @@ def load_layer_data_with_paths(filepath):
             while current_id in id_to_info and current_id not in visited_ids:
                 visited_ids.add(current_id)
                 info = id_to_info[current_id]
-                if info['name']: path_parts.append(info['name'])
+                # <<< 修改部分：在這裡就將名稱中的 / 替換成 _，確保路徑格式一致
+                if info['name']: path_parts.append(info['name'].replace('/', '_'))
                 parent_id = info['group_layer_id']
                 if parent_id == 0: break
                 current_id = parent_id
-            paths[layer_id] = "/".join(reversed(path_parts))
+            # <<< 修改部分：路徑組合符號也統一用 _，避免混淆
+            paths[layer_id] = "_".join(reversed(path_parts))
         df['full_path'] = df['layer_id'].map(paths)
-        df['full_path'] = df['full_path'].fillna(df['name'])
+        # <<< 修改部分：處理沒有父層級的圖層名稱
+        df['full_path'] = df['full_path'].fillna(df['name'].str.replace('/', '_'))
         print("[INFO] 完整路徑建立完成。")
         return df
     except Exception as e:
@@ -60,15 +63,19 @@ def load_sinfo_data_manual(filepath):
     print(f"[INFO] 正在解析 '{filepath}'...")
     rules = []
     try:
-        with open(filepath, 'r', encoding='utf-16', newline='') as f:
+        with open(filepath, 'r', encoding='utf-8', newline='') as f:
             reader = csv.reader(f, delimiter='\t')
             for row in reader:
                 if not row: continue
                 rule_type = row[0].strip()
                 if rule_type == 'dress' and len(row) >= 5:
-                    rules.append({'type': 'dress', 'name': row[1].strip(), 'id': row[3].strip(), 'path': row[4].strip()})
+                    # <<< 修改部分：在讀取規則時，也將路徑中的 / 替換成 _
+                    rule_path = row[4].strip().replace('/', '_')
+                    rules.append({'type': 'dress', 'name': row[1].strip(), 'id': row[3].strip(), 'path': rule_path})
                 elif rule_type == 'face' and len(row) >= 4:
-                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': row[3].strip()})
+                    # <<< 修改部分：在讀取規則時，也將路徑中的 / 替換成 _
+                    rule_path = row[3].strip().replace('/', '_')
+                    rules.append({'type': 'face', 'name': row[1].strip(), 'path': rule_path})
         print(f"[INFO] '{filepath}' 解析成功，載入 {len(rules)} 條規則。")
         return rules
     except Exception as e:
@@ -158,7 +165,8 @@ def process_character(txt_path, sinfo_path, log_file):
 
     path_to_id = pd.Series(layer_df.layer_id.values, index=layer_df.full_path).to_dict()
     id_to_path = {v: k for k, v in path_to_id.items()}
-    dress_fingerprint_map = {}
+    
+    # <<< 修改部分：刪除了 dress_fingerprint_map 變數的初始化
 
     dress_rules, face_rules, conditional_faces = defaultdict(lambda: defaultdict(list)), defaultdict(list), defaultdict(lambda: defaultdict(dict))
     for rule in sinfo_rules:
@@ -183,13 +191,8 @@ def process_character(txt_path, sinfo_path, log_file):
                 log_file.write(f"[服裝定義失敗] '{current_dress_key}' 的所有部件在 .txt 中都找不到，已跳過。\n")
                 continue
 
-            if valid_ids in dress_fingerprint_map:
-                original_dress_key = dress_fingerprint_map[valid_ids]
-                log_file.write(f"[服裝定義重複] '{current_dress_key}' 的部件與 '{original_dress_key}' 完全相同，已跳過此服裝的所有組合。\n")
-                print(f"  ⏭️  服裝定義重複，跳過 (與 {original_dress_key} 相同)")
-                continue
-            else:
-                dress_fingerprint_map[valid_ids] = current_dress_key
+            # <<< 修改部分：將整個檢查服裝定義重複的 if/else 區塊刪除
+            # (原本在這裡有一段 if valid_ids in dress_fingerprint_map: ... 的程式碼)
             
             priority_overlay_ids, other_dress_ids = [], []
             for p in dress_paths:
@@ -221,16 +224,19 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
         
         face_layers, all_paths_found = [], True
         for p in face_paths:
-            lid = path_to_id.get(p)
+            # <<< 修改部分：在查找路徑前，也將路徑中的 / 替換成 _
+            lookup_path = p.replace('/', '_')
+            lid = path_to_id.get(lookup_path)
             if lid is None:
-                log_file.write(f"[路徑查找失敗] {combination_context}: 部件路徑 '{p}' 在 .txt 中找不到。\n")
+                log_file.write(f"[路徑查找失敗] {combination_context}: 部件路徑 '{lookup_path}' 在 .txt 中找不到。\n")
                 all_paths_found = False
             face_layers.append(lid)
         
         if not all_paths_found: continue
 
-        sorted_face_paths = sorted(face_paths, key=lambda p: p.count('/'), reverse=True)
-        sorted_face_layers = [path_to_id.get(p) for p in sorted_face_paths]
+        # <<< 修改部分：排序時也對路徑進行格式統一化
+        sorted_face_paths = sorted(face_paths, key=lambda p: p.replace('/', '_').count('_'), reverse=True)
+        sorted_face_layers = [path_to_id.get(p.replace('/', '_')) for p in sorted_face_paths]
         final_layers = base_layers + sorted_face_layers + priority_overlays + final_overlays
         
         existing_layers_info, missing_parts_log = [], []
@@ -271,10 +277,10 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
 
 # --- 4. 程式主入口 ---
 if __name__ == '__main__':
-    LOG_FILENAME = "missing_layers_log.txt"
+    LOG_FILENAME = "generation_log.txt" # <<< 修改部分：更改日誌檔案名，避免與舊日誌混淆
     print(f"程式啟動：自動掃描檔案配對... 錯誤日誌將寫入 {LOG_FILENAME}")
     with open(LOG_FILENAME, 'w', encoding='utf-8') as log_file:
-        log_file.write(f"--- 缺失部件檢查日誌 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) ---\n")
+        log_file.write(f"--- 圖片生成日誌 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) ---\n")
         
         txt_files = [f for f in glob.glob('*.txt') if 'sinfo' not in f.lower() and 'log' not in f.lower()]
         if not txt_files: 
