@@ -5,16 +5,16 @@ import glob
 def generate_tjs_from_txts(input_files):
     """
     讀取多個 Kirikiri 的圖層定義 .txt 檔案，
-    並將它們合併成一個用於匯出所有圖層檔案和關聯 .sinfo 檔案的 TJS 腳本。
+    並將它們合併成一個用於匯出所有圖層檔案和關聯 .sinfo/.pbd 檔案的 TJS 腳本。
     """
     # --- 1. 基本設定 ---
     image_extension = ".tlg"
     sinfo_extension = ".sinfo"
+    pbd_extension = ".pbd"  # 新增 .pbd 副檔名
     output_tjs_path = "appconfig.tjs"
 
     # --- 2. 準備 TJS 腳本內容 ---
     tjs_script_content = []
-    total_files_to_dump = 0
     
     # 使用集合 (set) 來避免重複加入相同的檔名
     files_to_dump = set()
@@ -29,15 +29,27 @@ def generate_tjs_from_txts(input_files):
         
         base_filename_full = os.path.splitext(os.path.basename(input_txt_path))[0]
         
-        # *** 新增的邏輯：處理 .sinfo 檔案 ***
+        # *** 處理 .sinfo 檔案 ***
         # 取得第一個底線前的部分作為 sinfo 檔名
         sinfo_base_name = base_filename_full.split('_')[0]
         files_to_dump.add(f"{sinfo_base_name}{sinfo_extension}")
         files_to_dump.add(f"{sinfo_base_name}{sinfo_extension}.txt") # 也嘗試 .sinfo.txt
 
+        # ▼▼▼▼▼ 唯一新增的程式碼 ▼▼▼▼▼
+        # *** 處理 .pbd 檔案 ***
+        # 使用 .txt 的完整主檔名作為 .pbd 檔名
+        files_to_dump.add(f"{base_filename_full}{pbd_extension}")
+        # ▲▲▲▲▲ 唯一新增的程式碼 ▲▲▲▲▲
+
         try:
-            with open(input_txt_path, 'r', encoding='utf-8-sig') as f_in:
-                headers = f_in.readline().strip().split('\t')
+            with open(input_txt_path, 'r', encoding='utf-16') as f_in:
+                # 過濾掉格式不符的檔案
+                headers_line = f_in.readline()
+                if 'layer_id' not in headers_line:
+                    print(f"警告：'{input_txt_path}' 格式不符 (找不到 'layer_id' 標頭)，已跳過。")
+                    continue
+                
+                headers = headers_line.strip().split('\t')
                 
                 try:
                     layer_id_col_index = headers.index('layer_id')
@@ -64,8 +76,9 @@ def generate_tjs_from_txts(input_files):
 
     # --- 4. 根據收集到的檔名清單產生 TJS 腳本 ---
     for filename in sorted(list(files_to_dump)): # 排序讓腳本內容更有條理
+        escaped_filename = filename.replace('\\', '\\\\')
         tjs_block = (
-            f'try {{ Scripts.evalStorage("{filename}"); }}\n'
+            f'try {{ Scripts.evalStorage("{escaped_filename}"); }}\n'
             f'catch{{}}'
         )
         tjs_script_content.append(tjs_block)
@@ -101,5 +114,7 @@ if __name__ == "__main__":
     else:
         print("請提供要轉換的 .txt 檔案路徑。")
         print("用法 1 (指定多個檔案): python generate_batch_dumper.py file1.txt file2.txt")
-
         print("用法 2 (使用萬用字元): python generate_batch_dumper.py *.txt")
+
+    print("\n按 Enter 鍵結束...")
+    input()
