@@ -42,7 +42,7 @@ def generate_tjs_from_txts(input_files):
         # ▲▲▲▲▲ 唯一新增的程式碼 ▲▲▲▲▲
 
         try:
-            with open(input_txt_path, 'r', encoding='utf-16') as f_in:
+            with open(input_txt_path, 'r', encoding='utf-8-sig') as f_in:
                 # 過濾掉格式不符的檔案
                 headers_line = f_in.readline()
                 if 'layer_id' not in headers_line:
@@ -118,3 +118,4 @@ if __name__ == "__main__":
 
     print("\n按 Enter 鍵結束...")
     input()
+
