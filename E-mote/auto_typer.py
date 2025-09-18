@@ -5,22 +5,20 @@ import threading
 
 def get_user_inputs():
     """
-    這個函式負責向使用者取得所有必要的初始數值。
-    w 和 d 的值已在此處固定為 1000。
-    所有輸入都將被處理為整數。
+    在程式啟動時，獲取一次使用者輸入。
     """
-    print("--- 歡迎使用座標自動輸入工具 (可重複執行版) ---")
-    print("(w 和 d 的值已固定為 1000)")
-    # 直接設定 w 和 d 的值為整數
-    w = 1000
-    d = 1000
+    print("--- 歡迎使用座標自動輸入工具 (循環版) ---")
+    print("請輸入您要循環使用的參數：")
+    
     while True:
         try:
+            w = int(input("請輸入 w 的值: "))
+            d = int(input("請輸入 d 的值: "))
             x_start = int(input("請輸入初始 x 的值: "))
             y_start = int(input("請輸入初始 y 的值: "))
             
-            cols = int(input("請輸入網格的欄數 (例如 2x3 的 2): "))
-            rows = int(input("請輸入網格的列數 (例如 2x3 的 3): "))
+            cols = int(input("請輸入網格的欄數: "))
+            rows = int(input("請輸入網格的列數: "))
             
             if cols <= 0 or rows <= 0:
                 print("錯誤：欄數和列數必須是大於 0 的整數。請重新輸入。")
@@ -34,21 +32,22 @@ def get_user_inputs():
 
 def main():
     """
-    主執行函式，整合了快速鍵和重複執行功能。
+    主執行函式，每次重複都執行完整的 wdxy->xy 序列。
     """
+    # 1. 在所有迴圈開始前，只獲取一次參數
     w, d, x_start, y_start, cols, rows = get_user_inputs()
     
     proceed_event = threading.Event()
-    HOTKEY = 'f8' 
+
+    # 2. 只需設定 F8 一個快速鍵
+    HOTKEY = 'f8'
     keyboard.add_hotkey(HOTKEY, lambda: proceed_event.set())
 
     print("\n設定完成！")
-    print(f"現在程式將使用 '{HOTKEY}' 作為繼續的快速鍵。")
-    print("請在 5 秒內將游標點擊到您要輸入的程式視窗中...")
-    time.sleep(5)
-    
-    # ------------------- 程式碼變更部分 -------------------
-    # 這是主執行迴圈，它會一直重複直到手動關閉程式
+    print(f"現在程式將使用 '{HOTKEY}' 作為唯一的控制鍵。")
+    print("你可以開始操作了。")
+
+    # 3. 簡化為單一的無限迴圈
     run_count = 0
     while True:
         run_count += 1
@@ -60,34 +59,42 @@ def main():
                 for c in range(cols):
                     entry_count = r * cols + c + 1
                     
-                    # 將等待快速鍵的邏輯統一放在執行動ˋ作之前
                     proceed_event.clear()
                     print(f"請按下 '{HOTKEY}' 鍵以輸入第 {entry_count}/{total_entries} 組座標...")
                     proceed_event.wait()
                     
-                    # 計算並執行輸入
                     target_x = x_start - c * w
                     target_y = y_start - r * d
                     
-                    print(f"正在輸入: ({target_x}, {target_y})")
-                    
-                    pyautogui.write(str(target_x))
-                    pyautogui.press('tab')
-                    pyautogui.write(str(target_y))
-            
-            print("\n--- 本輪序列輸入完畢！ ---")
-            print(f"你可以移動滑鼠到新的位置，再次按下 '{HOTKEY}' 以重新開始新的一輪。")
-            print("若要結束程式，請直接關閉此視窗，或按 Ctrl+C。")
+                    # 4. 判斷邏輯簡化：只看是否為網格的起點
+                    is_first_entry = (r == 0 and c == 0)
+                    if is_first_entry:
+                        print(f"正在輸入起始點 (WDXY): {w}, {d}, {target_x}, {target_y}")
+                        pyautogui.press('tab')
+                        pyautogui.write(str(w))
+                        pyautogui.press('tab')
+                        pyautogui.write(str(d))
+                        pyautogui.press('tab')
+                        pyautogui.write(str(target_x))
+                        pyautogui.press('tab')
+                        pyautogui.write(str(target_y))
+                    else:
+                        print(f"正在輸入後續點 (XY): {target_x}, {target_y}")
+                        pyautogui.press('tab')
+                        pyautogui.press('tab')
+                        pyautogui.press('tab')
+                        pyautogui.write(str(target_x))
+                        pyautogui.press('tab')
+                        pyautogui.write(str(target_y))
 
-        except pyautogui.FailSafeException:
-            print("\n錯誤：PyAutoGUI 安全機制觸發！程式已停止。")
-            break # 發生錯誤時跳出迴圈
+            print("\n--- 本輪序列輸入完畢！ ---")
+            print(f" -> 請按下 '{HOTKEY}' 鍵以 [完整重複] 新的一輪。")
+            print(" -> 若要結束程式，請直接關閉此視窗。")
+
         except Exception as e:
             print(f"\n程式執行時發生錯誤: {e}")
-            break # 發生錯誤時跳出迴圈
-    # ----------------------------------------------------
+            break
 
-    # 程式結束前清理快速鍵
     keyboard.unhook_all_hotkeys()
     print("程式已結束。")
 
