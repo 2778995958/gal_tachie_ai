@@ -1,4 +1,4 @@
-# process_pipeline.py (v10.0 - 新增批次處理模式)
+# process_pipeline.py (v11.0 - 批次模式支援位置百搭)
 
 import os
 import sys
@@ -13,7 +13,7 @@ except ImportError:
     def tqdm(iterable, *args, **kwargs):
         return iterable
 
-# --- 更新後的佈局定義 ---
+# ... (LAYOUTS, SUPPORTED_FORMATS, FLAGS 等定義與 v10.0 相同)
 LAYOUTS = {
     '1x2': [1, 1], '2x1': [2], '1x3': [1, 1, 1], '3x1': [3], '2x2': [2, 2], '1x4': [1, 1, 1, 1],
     '1x5': [1, 1, 1, 1, 1], '3x2': [3, 3], '2x3': [2, 2, 2], '2x4': [2, 2, 2, 2], '3x3': [3, 3, 3],
@@ -28,37 +28,28 @@ BATCH_FLAGS = ['-b', '--batch']
 def print_detailed_usage():
     script_name = os.path.basename(sys.argv[0])
     print("=" * 80)
-    print(f" 終極圖片處理管線 v10.0 - 詳細使用說明")
+    print(f" 終極圖片處理管線 v11.0 - 詳細使用說明")
     print("=" * 80)
-    
     print("\n【模式一：手動模式】")
-    print("  對指定的單一任務進行處理。")
+    # ... (手動模式說明不變)
     print(f"  用法: python {script_name} <layout> <output> <sources...> [flags...]")
-    
     print("\n【模式二：批次模式】")
     print("  自動掃描並處理當前目錄下所有符合命名規則的專案。")
-    print(f"  用法: python {script_name} -b [--crop] [--animated] [--format <ext>]")
-    print("  命名規則: 專案資料夾需命名為 '專案名_佈局指令' (例如: myProject_3x2)。")
-    print("            來源圖片需放在其下的子資料夾中 (例如: myProject_3x2/part1, ...)。")
-
-    print("\n【必要參數 (手動模式)】")
-    print("  <layout>      : 指定合併的佈局。可用的佈局指令如下：")
-    for key, value in LAYOUTS.items():
-        print(f"    - {key:<10}: {str(value):<18} (共 {sum(value)} 張圖)")
-    # ... (其餘說明與 v9.0 相同)
-    print("  <output_dir>  : 儲存最終成品的資料夾。")
-    print("  <sources...>  : 一或多個來源圖片資料夾。其順序決定了在佈局中的位置。")
-
+    print(f"  用法: python {script_name} -b [-a <pos>] [--crop] [--animated] [--format <ext>]")
+    print("  命名規則: '專案名_佈局指令' (例如: myProject_3x2)。")
+    print("  -a <pos>  : (批次模式專用) 指定百搭圖的位置。")
+    print("              <pos> 是一個用逗號分隔的數字列表 (例如: 3,4,5)。")
+    # ... (其餘說明與 v10.0 類似，此處省略)
     print("\n【通用旗標 (Flags)】")
     print("  -b, --batch   : 啟用批次處理模式。")
-    print("  --a, --w...   : 將下一個路徑標記為『百搭圖』資料夾 (僅限手動模式)。")
+    print("  --a... <dir>  : 將路徑標記為『百搭圖』資料夾 (僅限手動模式)。")
     print("  --animated    : 啟用『動態圖合併模式』。")
     print("  --format <ext>: 強制指定輸出檔案的副檔名 (例如: gif)。")
     print("  --crop        : 在處理完成後，自動裁剪成品的透明邊界。")
     print("=" * 80)
 
 # ==============================================================================
-# 核心函式庫 (與v8.0相同，此處省略以保持簡潔)
+# 核心函式庫 (與v10.0相同)
 # ==============================================================================
 def find_first_image(directory):
     if not os.path.isdir(directory): return None
@@ -78,6 +69,7 @@ def chunk_list(data, sizes):
     it = iter(data)
     return [list(islice(it, size)) for size in sizes]
 
+# ... (merge_image_set 和 crop_and_overwrite 函式與 v10.0 完全相同，此處省略)
 def merge_image_set(image_paths, output_path, layout_structure, is_animated=False):
     # (此函式與 v8.0 完全相同)
     if is_animated:
@@ -166,14 +158,11 @@ def crop_and_overwrite(image_path):
                 return f"無需裁剪: {os.path.basename(image_path)}"
     except Exception as e: return None
 
-
 # ==============================================================================
-# 核心處理引擎 (由手動與批次模式共用)
+# 核心處理引擎 (與v10.0相同)
 # ==============================================================================
-
 def create_job_list(recipe, layout, output_dir, file_format):
-    # (此函式由 v8.0 的 create_job_list 演變而來)
-    # ...
+    # (此函式與 v10.0 完全相同)
     layout_structure = LAYOUTS[layout]
     expected_n = sum(layout_structure)
     if len(recipe) != expected_n:
@@ -207,7 +196,7 @@ def create_job_list(recipe, layout, output_dir, file_format):
     return jobs
 
 def execute_pipeline(jobs, is_animated, should_crop):
-    """執行合併與裁剪的完整流程"""
+    # (此函式與 v10.0 完全相同)
     if not jobs:
         print("未能生成任何有效的合併任務。")
         return
@@ -224,15 +213,14 @@ def execute_pipeline(jobs, is_animated, should_crop):
             list(tqdm(executor.map(crop_and_overwrite, successful_files), total=len(successful_files), desc="裁剪進度"))
         print("\n--- 裁剪階段完成 ---")
 
+
 # ==============================================================================
-# 模式切換與主流程控制
+# 模式切換與主流程控制 (run_batch_mode 已升級)
 # ==============================================================================
 
 def run_manual_mode(argv):
-    """手動模式執行流程"""
-    # (此函式由 v8.0 的 main 函式演變而來)
-    # ...
-    args = {} # Parse arguments manually
+    # (此函式與 v10.0 完全相同)
+    args = {} 
     if len(argv) < 4: print_detailed_usage(); return
     args['layout'] = argv[1]
     args['output_dir'] = argv[2]
@@ -255,50 +243,71 @@ def run_manual_mode(argv):
             is_next_wildcard = True; continue
         recipe.append({'type': 'wildcard' if is_next_wildcard else 'normal', 'dir': arg})
         is_next_wildcard = False
-    
     print("--- 步驟 1: 解析手動指令配方 ---")
     os.makedirs(args['output_dir'], exist_ok=True)
     jobs = create_job_list(recipe, args['layout'], args['output_dir'], args['format'])
     execute_pipeline(jobs, args['animated'], args['crop'])
 
 def run_batch_mode(argv):
-    """批次模式執行流程"""
+    """批次模式執行流程 (支援 -a 位置百搭)"""
     print("--- 批次處理模式已啟動 ---")
     # 提取通用旗標
     is_animated = '--animated' in argv
     should_crop = '--crop' in argv
     file_format = None
-    for i, arg in enumerate(argv):
-        if arg == '--format' and i + 1 < len(argv):
-            file_format = argv[i+1]
-            break
+    wildcard_positions_str = None
     
+    # 手動解析旗標，因為批次模式不使用固定位置參數
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == '--format':
+            if i + 1 < len(argv):
+                file_format = argv[i+1]
+                i += 1 # 跳過值
+        elif arg in ['-a', '--w', '--wildcard', '--all']: # 我們的目標
+            if i + 1 < len(argv):
+                wildcard_positions_str = argv[i+1]
+                i += 1
+        i += 1
+
+    wildcard_indices = set()
+    if wildcard_positions_str:
+        try:
+            # 將 1,2,3 轉換為 0-based 索引 {0, 1, 2}
+            wildcard_indices = {int(p) - 1 for p in wildcard_positions_str.split(',')}
+            print(f"已啟用位置百搭，指定位置: {wildcard_positions_str}")
+        except ValueError:
+            print(f"錯誤: 百搭位置列表 '{wildcard_positions_str}' 格式錯誤，應為用逗號分隔的數字。")
+            return
+
     # 掃描當前目錄尋找專案資料夾
     projects_found = 0
     for dir_name in sorted(os.listdir('.')):
-        if not os.path.isdir(dir_name): continue
-        
-        # 解析 '專案名_佈局'
+        if not os.path.isdir(dir_name) or dir_name == 'output': continue
         if '_' not in dir_name: continue
         name_part, _, layout = dir_name.rpartition('_')
         
         if layout in LAYOUTS:
             projects_found += 1
             print(f"\n{'='*20} 正在處理專案: {dir_name} {'='*20}")
-            
             project_dir = dir_name
             output_dir = os.path.join('output', project_dir)
             os.makedirs(output_dir, exist_ok=True)
             
-            # 獲取來源子資料夾
             source_dirs = sorted([os.path.join(project_dir, d) for d in os.listdir(project_dir) if os.path.isdir(os.path.join(project_dir, d))])
-            
             if not source_dirs:
                 print(f"警告: 專案 '{project_dir}' 中未找到任何來源子資料夾，已跳過。")
                 continue
                 
-            # 在批次模式下，所有來源都是 normal
-            recipe = [{'type': 'normal', 'dir': d} for d in source_dirs]
+            # --- 根據 wildcard_indices 動態生成配方 ---
+            recipe = []
+            for i, source_dir in enumerate(source_dirs):
+                if i in wildcard_indices:
+                    recipe.append({'type': 'wildcard', 'dir': source_dir})
+                    print(f"  - 位置 {i+1} ('{os.path.basename(source_dir)}') 設定為 百搭模式")
+                else:
+                    recipe.append({'type': 'normal', 'dir': source_dir})
             
             print("--- 步驟 1: 生成任務列表 ---")
             jobs = create_job_list(recipe, layout, output_dir, file_format)
