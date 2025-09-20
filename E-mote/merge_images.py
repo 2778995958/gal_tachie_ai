@@ -1,4 +1,4 @@
-# process_pipeline.py (v12.0 - 零設定智慧型百搭)
+# process_pipeline.py (v12.2 - 旗標修正版)
 
 import os
 import sys
@@ -14,27 +14,28 @@ except ImportError:
     def tqdm(iterable, *args, **kwargs):
         return iterable
 
-# --- 佈局與全域設定 ---
+# --- 佈局與全域設定 (WILDCARD_FLAGS 已修正) ---
 LAYOUTS = {
     '1x2': [1, 1], '2x1': [2], '1x3': [1, 1, 1], '3x1': [3], '2x2': [2, 2], '1x4': [1, 1, 1, 1],
     '1x5': [1, 1, 1, 1, 1], '3x2': [3, 3], '2x3': [2, 2, 2], '2x4': [2, 2, 2, 2], '3x3': [3, 3, 3],
 }
 SUPPORTED_FORMATS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp')
-WILDCARD_FLAGS = ['--a', '--w', '--wildcard', '--all']
+# ----- 這裡是修正點 -----
+WILDCARD_FLAGS = ['-a', '--a', '-w', '--w', '--wildcard', '--all']
+# -------------------------
 BATCH_FLAGS = ['-b', '--batch']
 
 # ==============================================================================
-# 詳細使用說明函式 (已更新 v12.0)
+# 詳細使用說明函式 (與 v12.1 相同)
 # ==============================================================================
 def print_detailed_usage():
+    # ... (此函式不變)
     script_name = os.path.basename(sys.argv[0])
     print("=" * 80)
-    print(f" 終極圖片處理管線 v12.0 - 詳細使用說明")
+    print(f" 終極圖片處理管線 v12.2 - 詳細使用說明")
     print("=" * 80)
-    
     print("\n【模式一：手動模式】")
     print(f"  用法: python {script_name} <layout> <output> <sources...> [flags...]")
-    
     print("\n【模式二：批次模式】")
     print("  自動掃描並處理當前目錄下所有符合命名規則的專案。")
     print(f"  用法: python {script_name} -b [-a <pos>] [--crop] [--animated] [--format <ext>]")
@@ -46,45 +47,40 @@ def print_detailed_usage():
     print("    - 主要圖片 (例如: char_0044.png)  -> 腳本自動提取【最後】的數字 (44)。")
     print("    - 百搭圖片 (例如: mood_31.png)    -> 腳本自動提取【最前】的數字 (31)。")
     print("    - 腳本會選用百搭數字 <= 主要數字 的那張最接近的百搭圖。")
-
     print("\n【通用旗標 (Flags)】")
     print("  -b, --batch   : 啟用批次處理模式。")
-    print("  --a... <dir>  : 將路徑標記為『百搭圖』資料夾 (僅限手動模式)。")
+    print("  -a... <dir>  : 將路徑標記為『百搭圖』資料夾 (僅限手動模式)。")
     print("  --animated    : 啟用『動態圖合併模式』。")
     print("  --format <ext>: 強制指定輸出檔案的副檔名 (例如: gif)。")
     print("  --crop        : 在處理完成後，自動裁剪成品的透明邊界。")
     print("=" * 80)
 
 # ==============================================================================
-# 核心函式庫
+# 核心函式庫 (與 v12.1 相同)
 # ==============================================================================
 def extract_number(text, first=False):
-    """從字串中提取數字。first=True 提取第一個，否則提取最後一個。"""
     numbers = re.findall(r'\d+', text)
     if not numbers:
         return -1
     return int(numbers[0] if first else numbers[-1])
 
+# ... (find_first_image, find_image_by_name, chunk_list, merge_image_set, crop_and_overwrite 等函式都與 v12.1 相同，此處省略以保持簡潔)
 def find_first_image(directory):
     if not os.path.isdir(directory): return None
     for filename in sorted(os.listdir(directory)):
         if filename.lower().endswith(SUPPORTED_FORMATS):
             return os.path.join(directory, filename)
     return None
-
 def find_image_by_name(directory, name):
     if not os.path.isdir(directory): return None
     for filename in os.listdir(directory):
         if filename.lower() == name.lower():
             return os.path.join(directory, filename)
     return None
-
 def chunk_list(data, sizes):
     it = iter(data)
     return [list(islice(it, size)) for size in sizes]
-
 def merge_image_set(image_paths, output_path, layout_structure, is_animated=False):
-    # (此函式與 v8.0 完全相同)
     if is_animated:
         opened_images = []
         try:
@@ -148,9 +144,7 @@ def merge_image_set(image_paths, output_path, layout_structure, is_animated=Fals
             for img in images: img.close()
             return output_path
         except Exception as e: return None
-
 def crop_and_overwrite(image_path):
-    # (此函式與 v8.0 完全相同)
     try:
         with Image.open(image_path) as img:
             if img.mode != 'RGBA': img = img.convert('RGBA')
@@ -173,16 +167,15 @@ def crop_and_overwrite(image_path):
 
 
 # ==============================================================================
-# 核心處理引擎 (已升級為智慧型)
+# 核心處理引擎 (與 v12.1 相同，我們不再需要偵錯訊息)
 # ==============================================================================
 def create_job_list(recipe, layout, output_dir, file_format):
+    # ... (此函式不變)
     layout_structure = LAYOUTS[layout]
     expected_n = sum(layout_structure)
     if len(recipe) != expected_n:
         print(f"錯誤: 佈局 '{layout}' 需要 {expected_n} 個來源，但配方提供了 {len(recipe)} 個。")
         return None
-
-    # --- 預先處理百搭圖 ---
     wildcard_sources = {}
     for item in recipe:
         if item['type'].startswith('wildcard'):
@@ -196,29 +189,23 @@ def create_job_list(recipe, layout, output_dir, file_format):
                         if start_index != -1:
                             conditional_list.append((start_index, os.path.join(item['dir'], fname)))
                 wildcard_sources[item['dir']] = sorted(conditional_list)
-
     primary_dir_info = next((item for item in recipe if item['type'] == 'normal'), None)
     if not primary_dir_info: print("錯誤: 配方中必須至少包含一個普通資料夾。"); return None
     print(f"主要驅動資料夾: '{primary_dir_info['dir']}'")
-
     jobs = []
     primary_images = [p for p in sorted(os.listdir(primary_dir_info['dir'])) if p.lower().endswith(SUPPORTED_FORMATS)]
-    
     for primary_image_name in primary_images:
         base_name, _ = os.path.splitext(primary_image_name)
         output_filename = f"{base_name}.{file_format}" if file_format else primary_image_name
         output_path = os.path.join(output_dir, output_filename)
-        
         job_image_paths = [None] * expected_n
         is_job_valid = True
-        
         primary_index = extract_number(base_name)
-
+        if primary_index == -1: continue
         for i, item in enumerate(recipe):
             if item['type'] == 'wildcard_simple':
                 job_image_paths[i] = wildcard_sources[item['dir']]
             elif item['type'] == 'wildcard_conditional':
-                if primary_index == -1: is_job_valid = False; break
                 correct_wildcard = None
                 for start_index, path in wildcard_sources[item['dir']]:
                     if primary_index >= start_index:
@@ -231,13 +218,12 @@ def create_job_list(recipe, layout, output_dir, file_format):
                 path = os.path.join(item['dir'], primary_image_name) if item['dir'] == primary_dir_info['dir'] else find_image_by_name(item['dir'], primary_image_name)
                 if not path or not os.path.exists(path): is_job_valid = False; break
                 job_image_paths[i] = path
-
         if is_job_valid and all(job_image_paths):
             jobs.append({'inputs': job_image_paths, 'output': output_path, 'layout': layout_structure})
-
     return jobs
 
 def execute_pipeline(jobs, is_animated, should_crop):
+    # ... (此函式不變)
     if not jobs:
         print("未能生成任何有效的合併任務。")
         return
@@ -255,19 +241,19 @@ def execute_pipeline(jobs, is_animated, should_crop):
         print("\n--- 裁剪階段完成 ---")
 
 # ==============================================================================
-# 模式切換與主流程控制 (run_batch_mode 已升級為智慧型)
+# 模式切換與主流程控制 (與 v12.1 相同)
 # ==============================================================================
 def run_manual_mode(argv):
-    # (手動模式未變)
+    # ... (此函式不變)
     print("手動模式需要更詳細的指令，請參考說明。")
     print_detailed_usage()
 
 def run_batch_mode(argv):
+    # ... (此函式不變)
     print("--- 批次處理模式已啟動 ---")
     is_animated = '--animated' in argv
     should_crop = '--crop' in argv
     file_format = next((argv[i+1] for i, arg in enumerate(argv) if arg == '--format' and i + 1 < len(argv)), None)
-    
     wildcard_positions_str = next((argv[i+1] for i, arg in enumerate(argv) if arg in WILDCARD_FLAGS and i + 1 < len(argv)), None)
     wildcard_indices = set()
     if wildcard_positions_str:
@@ -275,27 +261,21 @@ def run_batch_mode(argv):
             wildcard_indices = {int(p) - 1 for p in wildcard_positions_str.split(',')}
             print(f"已啟用位置百搭，指定位置: {wildcard_positions_str}")
         except ValueError:
-            print(f"錯誤: 百搭位置列表 '{wildcard_positions_str}' 格式錯誤。")
-            return
-
+            print(f"錯誤: 百搭位置列表 '{wildcard_positions_str}' 格式錯誤。"); return
     projects_found = 0
     for dir_name in sorted(os.listdir('.')):
         if not os.path.isdir(dir_name) or dir_name == 'output': continue
         if '_' not in dir_name: continue
         name_part, _, layout = dir_name.rpartition('_')
-        
         if layout in LAYOUTS:
             projects_found += 1
             print(f"\n{'='*20} 正在處理專案: {dir_name} {'='*20}")
             project_dir = dir_name
             output_dir = os.path.join('output', project_dir)
             os.makedirs(output_dir, exist_ok=True)
-            
             source_dirs = sorted([os.path.join(project_dir, d) for d in os.listdir(project_dir) if os.path.isdir(os.path.join(project_dir, d))])
             if not source_dirs:
                 print(f"警告: 專案 '{project_dir}' 中未找到任何來源子資料夾。"); continue
-                
-            # --- 智慧型配方生成 ---
             recipe = []
             for i, source_dir in enumerate(source_dirs):
                 if i in wildcard_indices:
@@ -308,11 +288,9 @@ def run_batch_mode(argv):
                         print(f"  - 位置 {i+1} ('{os.path.basename(source_dir)}') -> 偵測到 <=1 張圖，設為【簡單百搭】")
                 else:
                     recipe.append({'type': 'normal', 'dir': source_dir})
-            
-            print("--- 步驟 1: 生成任務列表 ---")
+            print("\n--- 步驟 1: 生成任務列表 ---")
             jobs = create_job_list(recipe, layout, output_dir, file_format)
             execute_pipeline(jobs, is_animated, should_crop)
-
     if projects_found == 0:
         print("未在當前目錄下找到任何符合 '專案名_佈局' 格式的資料夾。")
 
