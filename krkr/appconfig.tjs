@@ -1,0 +1,19 @@
+KAGLoadScript("KAGEnvPlayer.tjs");
+
+var scn_list = KAGEnvPlayer.internalGetSceneFileList("!scnlist.txt");
+
+for (var i = 0; i < scn_list.count; ++i) {
+
+	try
+
+	{
+
+	Scripts.evalStorage(scn_list[i] + ".scn");
+
+	}
+
+	catch{}
+
+}
+
+System.exit();
