@@ -26,7 +26,7 @@ def create_zip_archive(zip_path, source_folder, file_list):
     """
     print(f"    正在建立 ZIP 檔: {os.path.basename(zip_path)} ({len(file_list)} 個檔案)...")
     try:
-        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:
             for filename in file_list:
                 file_path = os.path.join(source_folder, filename)
                 zipf.write(file_path, arcname=filename)
@@ -118,4 +118,5 @@ def main():
     print("--- 所有批量任務完成 ---")
 
 if __name__ == "__main__":
+
     main()
