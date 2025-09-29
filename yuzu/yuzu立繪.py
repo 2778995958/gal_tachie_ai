@@ -9,8 +9,8 @@ from datetime import datetime
 
 # ==============================================================================
 # --- 使用者設定區 ---
-SPECIAL_UNDERLAY_IDS = {8320, 8321} 
-PRIORITY_OVERLAY_PATHS = {'かぶせ 水着'}
+SPECIAL_UNDERLAY_IDS = {832000, 832100} 
+PRIORITY_OVERLAY_PATHS = {'かぶせ 水着000'}
 # ==============================================================================
 
 
@@ -280,3 +280,4 @@ if __name__ == '__main__':
             for txt_file in txt_files:
                 process_character(txt_file, txt_file.replace('.txt', '.sinfo.txt'), log_file)
     print(f"\n所有處理任務已完成！請檢查 output 資料夾以及 {LOG_FILENAME} 日誌檔案。")
+
