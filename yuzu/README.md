@@ -18,6 +18,7 @@ yuzu立繪.py本體，一鍵合圖，不太完善(可能只用在柚子
 檔名角色分資料夾.py如名
 
 ```
+僅限於sinfo只有dress和face
 pbd拿到json，用jsontxt.py轉成txt，檔名刪.pbd(過程遺物，懶得改回去變成每次都要刪.pbd檔名最後就懂)
 sinfo用[github.com] sinfotxt.py轉txt，留意txt有沒亂碼去改編碼
 把立繪分類，第一個底線分資料夾
