@@ -1,8 +1,11 @@
-# 【Purpure立繪合成系統 Ver. 40.0 - 堆疊順序檔名版】
+# 【Purpure立繪合成系統 Ver. 41.0 - 服裝多層堆疊版】
 # 修正重點：
-# 1. 檔名 ID 排序邏輯修改：取消數字排序，改為「先疊先放」(Draw Order)。
-#    這確保了 Dress ID (因為是最先被畫的) 永遠在檔名的最前面。
-# 2. 保留了 Ver 38/39 的強力路徑搜尋，確保貓耳不會消失。
+# 1. 支援 "同一服裝名 = 同一套圖" 的邏輯。
+#    例如:
+#    dress 制服 ... 制服
+#    dress 制服 ... メガネ
+#    程式會將這兩行合併，合成時同時畫出 "制服" 和 "メガネ"。
+# 2. 保持先前的所有功能 (ID檔名、自動裁切、貓耳自動搜尋)。
 
 import os
 import glob
@@ -12,7 +15,7 @@ from datetime import datetime
 # ==============================================================================
 # --- 設定區 ---
 # ==============================================================================
-MIMI_VARIANTS = [0, 1, 2]        # 差分變數
+MIMI_VARIANTS = [0, 1, 2]        # 差分變數 (mimi)
 GENERATE_SIMPLE_MODE = True      # 是否生成無 mimi 版
 OUTPUT_ROOT = "output"           # 輸出資料夾
 # ==============================================================================
@@ -115,7 +118,9 @@ class LayerSystem:
 class RuleSystem:
     def __init__(self, sinfo_path):
         self.sinfo_path = sinfo_path
-        self.dresses = []
+        # 修改：不再是用 list 存單個 dress，而是用 OrderList + Dict 來分組
+        self.dress_order = []      # 記錄服裝名稱出現的順序 (例如 ["制服", "制服メガネなし"])
+        self.dress_layers = {}     # 記錄服裝對應的圖層列表 (例如 "制服" -> ["制服", "メガネ"])
         self.aliases = {}
         self.fgnames = {} 
 
@@ -131,7 +136,16 @@ class RuleSystem:
 
                     if cmd == 'dress':
                         if len(parts) >= 5:
-                            self.dresses.append({"name": parts[1].strip(), "layer_name": parts[4].strip()})
+                            d_name = parts[1].strip()
+                            d_layer = parts[4].strip()
+                            
+                            # --- 關鍵修改：服裝分組邏輯 ---
+                            if d_name not in self.dress_layers:
+                                self.dress_layers[d_name] = []
+                                self.dress_order.append(d_name) # 記錄順序
+                            
+                            # 將該行定義的 layer 加入該服裝的清單中
+                            self.dress_layers[d_name].append(d_layer)
                     
                     elif cmd == 'fgname':
                         logic_name = parts[1].strip()
@@ -175,21 +189,32 @@ def process_character(txt_file, sinfo_file, log_file):
 
     generated_files = set()
 
-    for dress in rule_sys.dresses:
-        dress_name = dress['name']
-        base_layer_path = dress['layer_name']
+    # --- 依照服裝順序處理 ---
+    for dress_name in rule_sys.dress_order:
         
-        base_info = layer_sys.get_layer_by_path(base_layer_path)
-        if not base_info:
-            print(f"[跳過] 找不到服裝底圖: {base_layer_path}")
+        # 1. 取得該服裝的所有基礎圖層 (支援多層)
+        target_layers = rule_sys.dress_layers[dress_name]
+        base_layer_infos = []
+        
+        missing_base = False
+        for path in target_layers:
+            l_info = layer_sys.get_layer_by_path(path)
+            if l_info:
+                base_layer_infos.append(l_info)
+            else:
+                print(f"[警告] 找不到服裝 '{dress_name}' 的構成圖層: {path}")
+                missing_base = True
+        
+        if missing_base and not base_layer_infos:
+            print(f"[跳過] 服裝 {dress_name} 完全無法讀取")
             continue
         
-        print(f"--- 處理中: {dress_name} ---")
+        print(f"--- 處理中: {dress_name} (由 {len(base_layer_infos)} 個圖層組成) ---")
 
         for mimi_val in loop_variants:
             is_simple_mode = (mimi_val is None)
             
-            # 1. 搜尋自動綁定部件 (e.g. 貓耳)
+            # 2. 搜尋自動綁定部件 (e.g. 貓耳)
             auto_parts = []
             if not is_simple_mode:
                 suffix = f"@{dress_name}"
@@ -202,11 +227,13 @@ def process_character(txt_file, sinfo_file, log_file):
                                 if p_info:
                                     auto_parts.append(p_info)
             
-            # 2. 處理每個表情
+            # 3. 處理每個表情
             for alias_name, components in rule_sys.aliases.items():
                 draw_queue = []
-                # 順序 A: 衣服 (最底層)
-                draw_queue.append(base_info)
+                
+                # 順序 A: 衣服列表 (最底層，可能包含多個圖層，如 本體+眼鏡)
+                draw_queue.extend(base_layer_infos)
+                
                 # 順序 B: 自動配件 (貓耳)
                 draw_queue.extend(auto_parts)
 
@@ -236,13 +263,10 @@ def process_character(txt_file, sinfo_file, log_file):
 
                 if not draw_queue: continue
 
-                # --- 檔名生成 (修改部分) ---
-                # 提取所有用到的 ID
+                # --- 檔名生成 ---
                 used_ids = [str(p['id']) for p in draw_queue]
                 
-                # 去除重複但「保留順序」
-                # 因為 draw_queue 是按照 衣服 -> 耳朵 -> 五官 順序建立的
-                # 所以 衣服 ID 一定會排在第一個
+                # 去重但保留順序 (確保衣服ID在最前)
                 ordered_unique_ids = []
                 seen = set()
                 for uid in used_ids:
@@ -289,7 +313,7 @@ def process_character(txt_file, sinfo_file, log_file):
 
 if __name__ == '__main__':
     LOG_FILENAME = "generation_log.txt"
-    print(f"程式啟動 (Ver 40.0 - Ordered IDs)... Log: {LOG_FILENAME}")
+    print(f"程式啟動 (Ver 41.0 - Multi-layer Dress)... Log: {LOG_FILENAME}")
     
     with open(LOG_FILENAME, 'w', encoding='utf-8') as log:
         log.write(f"--- {datetime.now()} ---\n")
