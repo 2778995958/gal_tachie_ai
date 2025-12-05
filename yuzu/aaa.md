@@ -38,11 +38,7 @@ pbd要用大佬的pbd2json.exe，我留了一個已經是歷史文物請在krkr�
 
 KirikiriTools去dump立繪所有角色，只刷姿勢就好，主要拿pbd有分姿勢
 
-如果你有看狠狠厥烂KiriKiriZ Cxdec拆包，我的回覆你拿到pbd就懂我做了什麼
-
-linuxdo那邊要驗證，這邊來回一下感謝大佬的思路
-
-我在做立繪，所以很難拿全部立繪檔，看了一下這思路
+如果你有看狠狠厥烂KiriKiriZ Cxdec拆包
 
 dump一次遊戲拿到角色pbd檔，一般tlg立繪是檔名+圖id.tlg
 
