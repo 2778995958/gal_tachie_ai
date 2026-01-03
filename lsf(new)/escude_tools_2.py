@@ -111,24 +111,64 @@ class TableManager:
 class ImageManager:
     @staticmethod
     def composite(base_img: Image.Image, lsf_data: LsfData, layer_index: int) -> Image.Image:
-        layer_info = lsf_data.layers_info[layer_index]; image_info = lsf_data.images[layer_index]
-        if not image_info.file_path or not os.path.exists(image_info.file_path): return base_img
+        layer_info = lsf_data.layers_info[layer_index]
+        image_info = lsf_data.images[layer_index]
+        
+        if not image_info.file_path or not os.path.exists(image_info.file_path): 
+            return base_img
+            
         with Image.open(image_info.file_path) as part_img:
-            part_img = part_img.convert("RGBA"); base_np = np.array(base_img, dtype=np.float64) / 255.0; part_np = np.array(part_img, dtype=np.float64) / 255.0
-            fg_layer = np.zeros_like(base_np); dx, dy = layer_info.rect.left, layer_info.rect.top; part_h, part_w = part_np.shape[:2]; base_h, base_w = base_np.shape[:2]
-            x1, y1 = max(dx, 0), max(dy, 0); x2, y2 = min(dx + part_w, base_w), min(dy + part_h, base_h)
-            part_x1, part_y1 = x1 - dx, y1 - dy; part_x2, part_y2 = x2 - dx, y2 - dy
-            if x1 < x2 and y1 < y2: fg_layer[y1:y2, x1:x2] = part_np[part_y1:part_y2, part_x1:part_x2]
-            bg_rgb, bg_a = base_np[:,:,:3], base_np[:,:,3:4]; fg_rgb, fg_a = fg_layer[:,:,:3], fg_layer[:,:,3:4]
-            mode = layer_info.mode; out_a = fg_a + bg_a * (1.0 - fg_a); mask = out_a > 1e-6
-            if mode == 3: out_rgb_blend = fg_rgb * bg_rgb
-            elif mode == 10: out_rgb_blend = fg_rgb + bg_rgb
-            else: out_rgb_blend = fg_rgb
-            numerator = out_rgb_blend * fg_a + bg_rgb * bg_a * (1.0 - fg_a); out_rgb = np.zeros_like(bg_rgb)
-            np.divide(numerator, out_a, where=mask, out=out_rgb)
-            final_np_float = np.concatenate([out_rgb, out_a], axis=2); final_np_float = np.clip(final_np_float, 0.0, 1.0) 
-            final_np_uint8 = (final_np_float * 255).round().astype(np.uint8)
-            return Image.fromarray(final_np_uint8, 'RGBA')
+            part_img = part_img.convert("RGBA")
+            if base_img.mode != 'RGBA':
+                base_img = base_img.convert('RGBA')
+
+            dx, dy = layer_info.rect.left, layer_info.rect.top
+            
+            # 準備一張跟底圖一樣大的暫存畫布
+            # 1. 如果是正片疊底 (Mode 3)，底色要是白色 (因為白色 x 任何色 = 原色)
+            # 2. 如果是相加 (Mode 10) 或其他，底色用透明
+            bg_color = (255, 255, 255, 0) if layer_info.mode == 3 else (0, 0, 0, 0)
+            layer_canvas = Image.new('RGBA', base_img.size, bg_color)
+            
+            # 將素材貼到暫存畫布的正確位置
+            layer_canvas.paste(part_img, (dx, dy), part_img)
+
+            # ==========================================
+            # 根據模式選擇正確的混合演算法
+            # ==========================================
+            
+            if layer_info.mode == 3:  # Multiply (正片疊底 / 乗算)
+                # 原理：白色變透明，深色疊加變暗
+                # 注意：這裡我們使用 ImageChops.multiply
+                # 為了避免透明度出錯，我們先把兩張圖都轉成 RGB 進行疊加運算，最後再把 Alpha 補回來
+                # (因為通常 Mode 3 是用來畫陰影，範圍不會超過底圖的角色)
+                
+                # 1. 建立混合用的圖層，背景全白 (255)
+                multiply_layer = Image.new('RGBA', base_img.size, (255, 255, 255, 255))
+                multiply_layer.paste(part_img, (dx, dy), part_img)
+                
+                # 2. 使用 Pillow 內建的 multiply
+                # 這會讓白色背景消失，只留下深色的帽子/陰影
+                result = ImageChops.multiply(base_img, multiply_layer)
+                
+                # 3. 修正 Alpha 通道 (通常保留底圖的 Alpha)
+                # 這能確保陰影不會畫到角色外面去，也不會產生奇怪的方塊
+                r, g, b, _ = result.split()
+                a = base_img.split()[3] # 取回底圖的 Alpha
+                return Image.merge('RGBA', (r, g, b, a))
+
+            elif layer_info.mode == 10: # Add (相加 / 線性加亮)
+                # 原理：黑色變透明，亮色疊加更亮
+                add_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
+                add_layer.paste(part_img, (dx, dy), part_img)
+                return ImageChops.add(base_img, add_layer)
+                
+            else: # Normal (一般模式)
+                # 使用 alpha_composite 確保半透明邊緣平滑 (無黑邊)
+                # 建立全透明圖層
+                normal_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
+                normal_layer.paste(part_img, (dx, dy), part_img)
+                return Image.alpha_composite(base_img, normal_layer)
 
 def read_string_from_pool(text_pool: bytes, offset: int, encoding='cp932') -> str:
     if offset >= len(text_pool): return f"<Invalid Offset: {offset}>"
