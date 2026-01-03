@@ -124,51 +124,75 @@ class ImageManager:
 
             dx, dy = layer_info.rect.left, layer_info.rect.top
             
-            # 準備一張跟底圖一樣大的暫存畫布
-            # 1. 如果是正片疊底 (Mode 3)，底色要是白色 (因為白色 x 任何色 = 原色)
-            # 2. 如果是相加 (Mode 10) 或其他，底色用透明
-            bg_color = (255, 255, 255, 0) if layer_info.mode == 3 else (0, 0, 0, 0)
-            layer_canvas = Image.new('RGBA', base_img.size, bg_color)
-            
-            # 將素材貼到暫存畫布的正確位置
-            layer_canvas.paste(part_img, (dx, dy), part_img)
+            # --- 針對不同模式的處理策略 ---
 
-            # ==========================================
-            # 根據模式選擇正確的混合演算法
-            # ==========================================
-            
-            if layer_info.mode == 3:  # Multiply (正片疊底 / 乗算)
-                # 原理：白色變透明，深色疊加變暗
-                # 注意：這裡我們使用 ImageChops.multiply
-                # 為了避免透明度出錯，我們先把兩張圖都轉成 RGB 進行疊加運算，最後再把 Alpha 補回來
-                # (因為通常 Mode 3 是用來畫陰影，範圍不會超過底圖的角色)
+            # 如果是特殊混合模式 (Mode 3: Multiply, Mode 10: Add)
+            # 我們使用 NumPy 進行「局部」數學運算，確保不影響其他區域
+            if layer_info.mode in [3, 10]:
+                base_np = np.array(base_img).astype(float) / 255.0
+                part_np = np.array(part_img).astype(float) / 255.0
                 
-                # 1. 建立混合用的圖層，背景全白 (255)
-                multiply_layer = Image.new('RGBA', base_img.size, (255, 255, 255, 255))
-                multiply_layer.paste(part_img, (dx, dy), part_img)
+                # 取得底圖與素材的尺寸
+                bh, bw = base_np.shape[:2]
+                ph, pw = part_np.shape[:2]
                 
-                # 2. 使用 Pillow 內建的 multiply
-                # 這會讓白色背景消失，只留下深色的帽子/陰影
-                result = ImageChops.multiply(base_img, multiply_layer)
+                # 計算重疊區域 (Intersection)
+                # 這是為了避免陣列越界的關鍵步驟
+                x1, y1 = max(dx, 0), max(dy, 0)
+                x2, y2 = min(dx + pw, bw), min(dy + ph, bh)
                 
-                # 3. 修正 Alpha 通道 (通常保留底圖的 Alpha)
-                # 這能確保陰影不會畫到角色外面去，也不會產生奇怪的方塊
-                r, g, b, _ = result.split()
-                a = base_img.split()[3] # 取回底圖的 Alpha
-                return Image.merge('RGBA', (r, g, b, a))
+                # 如果沒有重疊，直接回傳原圖
+                if x1 >= x2 or y1 >= y2:
+                    return base_img
 
-            elif layer_info.mode == 10: # Add (相加 / 線性加亮)
-                # 原理：黑色變透明，亮色疊加更亮
-                add_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
-                add_layer.paste(part_img, (dx, dy), part_img)
-                return ImageChops.add(base_img, add_layer)
+                # 計算素材在重疊區的對應座標
+                px1, py1 = x1 - dx, y1 - dy
+                px2, py2 = x2 - dx, y2 - dy
                 
-            else: # Normal (一般模式)
-                # 使用 alpha_composite 確保半透明邊緣平滑 (無黑邊)
-                # 建立全透明圖層
-                normal_layer = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
-                normal_layer.paste(part_img, (dx, dy), part_img)
-                return Image.alpha_composite(base_img, normal_layer)
+                # 提取重疊區域的像素資料 (只處理這一塊！)
+                bg_crop = base_np[y1:y2, x1:x2]
+                fg_crop = part_np[py1:py2, px1:px2]
+                
+                # 分離通道
+                bg_rgb = bg_crop[..., :3]
+                fg_rgb = fg_crop[..., :3]
+                fg_a = fg_crop[..., 3:4] # 素材的 Alpha (0.0 - 1.0)
+
+                # --- 核心數學公式 ---
+                if layer_info.mode == 3: # Multiply (正片疊底)
+                    # 公式： 結果 = 底色 * (1 - Alpha) + (底色 * 前景色) * Alpha
+                    # 簡化後： 底色 * (1 - Alpha + 前景色 * Alpha)
+                    # 這樣做的好處：當 Alpha=0 時保持底色不變；當 Alpha=1 時變成 (底色*前景色)
+                    factor = 1.0 - fg_a + (fg_rgb * fg_a)
+                    result_rgb = bg_rgb * factor
+                    
+                elif layer_info.mode == 10: # Add (相加)
+                    # 公式： 結果 = 底色 + (前景色 * Alpha)
+                    result_rgb = bg_rgb + (fg_rgb * fg_a)
+                
+                else:
+                    result_rgb = bg_rgb # 預備用
+
+                # 確保數值不超過 1.0
+                result_rgb = np.clip(result_rgb, 0.0, 1.0)
+                
+                # 將計算好的 RGB 寫回底圖陣列的對應位置
+                # 注意：我們只修改 RGB，保留底圖原本的 Alpha (這樣就不會把背景變透明或變灰)
+                base_np[y1:y2, x1:x2, :3] = result_rgb
+                
+                # 轉回圖片
+                return Image.fromarray((base_np * 255).astype(np.uint8), 'RGBA')
+
+            else:
+                # --- 一般模式 (Normal) ---
+                # 使用最標準的 alpha_composite (解決一般疊加的黑邊)
+                
+                # 建立一張透明畫布
+                layer_canvas = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
+                # 貼上素材
+                layer_canvas.paste(part_img, (dx, dy))
+                # 進行標準疊加
+                return Image.alpha_composite(base_img, layer_canvas)
 
 def read_string_from_pool(text_pool: bytes, offset: int, encoding='cp932') -> str:
     if offset >= len(text_pool): return f"<Invalid Offset: {offset}>"
