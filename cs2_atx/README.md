@@ -1,3 +1,8 @@
+gen_bustup_dict.py-->拿scene資料夾的立繪規則json
+
+batch_composite.py-->同目錄下找offsetjson合立繪
+
+---
 同是cs2系，但atximg混淆有夠搞，總算找到有還原的工具
 
 但也是沒組裝說明，循環所有組合吧
