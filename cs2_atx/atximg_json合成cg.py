@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor
 
 def composite(base_np, part_img, pos):
     part_np = np.array(part_img, dtype=np.uint8)
@@ -70,6 +71,16 @@ def load_folder_data(folder_path):
 
     return group_map, offset_map, base_key
 
+def do_composite(task, out_dir):
+    out_name, base_path, overlays = task
+    base_img = Image.open(base_path).convert("RGBA")
+    canvas = np.array(base_img)
+    for img_path, pos in overlays:
+        with Image.open(img_path) as part:
+            canvas = composite(canvas, part.convert("RGBA"), pos)
+    Image.fromarray(canvas).save(os.path.join(out_dir, out_name))
+    print(f"輸出: {out_name}")
+
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     cglist_path = os.path.join(script_dir, "cglist.lst")
@@ -77,21 +88,26 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     entries = parse_cglist(cglist_path)
-    # 快取已載入的資料夾
     cache = {}
+    tasks = []
 
     for entry_line, name, values in entries:
         if not values:
             continue
         folder_idx = values[0]
-        group_values = values[1:]  # 各 group 的選擇
+        group_values = values[1:]
 
-        # 資料夾名: name去掉最後一字 + 'l' + folder_idx
-        folder_name = name[:-1] + 'l' + folder_idx
-        folder_path = os.path.join(script_dir, folder_name)
-
-        if not os.path.isdir(folder_path):
-            print(f"跳過 {entry_line}：資料夾 {folder_name} 不存在")
+        prefix = name[:-1]
+        folder_path = None
+        actual_sz = name[-1]
+        for sz in (name[-1], 'l', 'm', 's'):
+            candidate = os.path.join(script_dir, prefix + sz + folder_idx)
+            if os.path.isdir(candidate):
+                folder_path = candidate
+                actual_sz = sz
+                break
+        if not folder_path:
+            print(f"跳過 {entry_line}：找不到資料夾 {prefix}[lms]{folder_idx}")
             continue
 
         if folder_path not in cache:
@@ -101,20 +117,17 @@ def main():
         if base_key is None:
             print(f"跳過 {entry_line}：找不到底圖")
             continue
-
         base_path = os.path.join(folder_path, base_key + ".png")
         if not os.path.isfile(base_path):
             print(f"跳過 {entry_line}：底圖 {base_key}.png 不存在")
             continue
 
-        # 收集要疊加的圖層
         overlays = []
         for gi, item_val in enumerate(group_values, start=1):
-            if not item_val:  # 空值跳過
+            if not item_val:
                 continue
             group = group_map.get(gi)
             if not group:
-                print(f"  警告 {entry_line}：group {gi} 不存在")
                 continue
             filename = group.get(item_val)
             if not filename:
@@ -130,18 +143,12 @@ def main():
                 continue
             overlays.append((img_path, pos))
 
-        # 合成
-        base_img = Image.open(base_path).convert("RGBA")
-        canvas = np.array(base_img)
-        for img_path, pos in overlays:
-            with Image.open(img_path) as part:
-                canvas = composite(canvas, part.convert("RGBA"), pos)
+        out_name = (prefix + actual_sz + ',' + ','.join(values)).replace(',', '_') + ".png"
+        tasks.append((out_name, base_path, overlays))
 
-        # 輸出檔名: 用逗號替換成底線
-        out_name = entry_line.replace(',', '_') + ".png"
-        Image.fromarray(canvas).save(os.path.join(out_dir, out_name))
-        print(f"輸出: {out_name}")
-
+    print(f"共 {len(tasks)} 張待合成")
+    with ThreadPoolExecutor() as pool:
+        pool.map(lambda t: do_composite(t, out_dir), tasks)
     print("完成！")
 
 if __name__ == '__main__':
