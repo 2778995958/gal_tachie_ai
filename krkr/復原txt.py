@@ -14,7 +14,7 @@ ENCODINGS_TO_TRY = [
 ]
 
 # 新檔案的目標編碼
-output_encoding = 'utf-8-sig'
+output_encoding = 'utf-8'
 
 # --- 主要轉換函式 ---
 def analyze_and_convert_file(input_path, target_encoding):
@@ -90,3 +90,4 @@ if __name__ == "__main__":
         print("使用方式：請將一個或多個要轉換的檔案，一起拖曳到此 .py 程式的圖示上。")
 
     os.system('pause')
+
