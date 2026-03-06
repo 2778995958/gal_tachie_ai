@@ -114,6 +114,10 @@ SEED_FILENAMES = [
     "replay.ks", "_chthum_index.pbd", "exchview.ini",
     "initialize.tjs", "startup.tjs", "override.tjs", "envinit.tjs",
     "gameconfig.tjs", "AfterInit.tjs", "phase.tjs", "env.tjs",
+    "scnchartdata.tjs", "imageevalmap.csv", "imagenamemap.txt",
+    "imagemulti.txt", "imagepropmap.txt", "imagedressmap.txt",
+    "sysse.ini", "systrans.ini", "anim_title.ini",
+    "filegain.csv", "soundgain.csv",
 ]
 filename_plaintexts.update(SEED_FILENAMES)
 
@@ -1035,6 +1039,345 @@ def from_hash_logs():
         print(f"  [hash_logs] 提取了 {fn_count} 個檔名、{pn_count} 個路徑名")
 
 
+def from_scnchartdata_tjs():
+    """從 scnchartdata.tjs 提取 .ks 劇本檔名"""
+    seed = "scnchartdata.tjs"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    content = safe_read_text(found)
+    if not content:
+        return
+    count = 0
+    seen = set()
+    for m in re.finditer(r'"([^"]+\.ks)"', content):
+        ks = m.group(1)
+        if ks not in seen:
+            seen.add(ks)
+            filename_plaintexts.update([ks, f"{ks}.scn"])
+            count += 1
+    if count:
+        print(f"  [scnchartdata] 提取了 {count} 個 ks 檔名")
+
+
+def _add_image_variants(name: str):
+    """為圖片名加入常見副檔名和 _censored 變體"""
+    for ext in (".pimg", ".tlg", ".png", ".psb"):
+        filename_plaintexts.add(f"{name}{ext}")
+        filename_plaintexts.add(f"{name}_censored{ext}")
+
+
+def from_imageevalmap_csv():
+    """從 imageevalmap.csv 提取圖片映射"""
+    seed = "imageevalmap.csv"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    rows = safe_read_csv(found)
+    count = 0
+    for row in rows:
+        if not row:
+            continue
+        header = row[0].replace("\ufeff", "").strip()
+        if header.startswith("#") or not header:
+            continue
+        for field in row[:2]:
+            name = field.strip()
+            if name and not name.startswith("&") and not name.startswith("#"):
+                _add_image_variants(name)
+                count += 1
+    if count:
+        print(f"  [imageevalmap] 提取了 {count} 個圖片名")
+
+
+def from_imagenamemap_txt():
+    """從 imagenamemap.txt 提取圖片名和 censored 映射"""
+    seed = "imagenamemap.txt"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    content = safe_read_text(found)
+    if not content:
+        return
+    count = 0
+    for line in content.splitlines():
+        line = line.strip().replace("\ufeff", "")
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        for part in parts:
+            part = part.strip()
+            if part and not part.startswith("_"):
+                _add_image_variants(part)
+                count += 1
+    if count:
+        print(f"  [imagenamemap] 提取了 {count} 個圖片名")
+
+
+def from_imagemulti_txt():
+    """從 imagemulti.txt 提取多解析度立繪名"""
+    seed = "imagemulti.txt"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    content = safe_read_text(found)
+    if not content:
+        return
+    count = 0
+    for line in content.splitlines():
+        line = line.strip().replace("\ufeff", "")
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        for part in parts:
+            part = part.strip()
+            # Remove resolution prefix like "200:" or "100:"
+            if ":" in part:
+                part = part.split(":", 1)[1].strip()
+            if not part:
+                continue
+            for ext in (".pbd", ".sinfo", ".pimg", ".stand"):
+                filename_plaintexts.add(f"{part}{ext}")
+            count += 1
+    if count:
+        print(f"  [imagemulti] 提取了 {count} 個立繪名")
+
+
+def from_imagepropmap_txt():
+    """從 imagepropmap.txt 提取特殊資源名"""
+    seed = "imagepropmap.txt"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    content = safe_read_text(found)
+    if not content:
+        return
+    count = 0
+    for line in content.splitlines():
+        line = line.strip().replace("\ufeff", "")
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        name = parts[0].strip()
+        if not name:
+            continue
+        if name.endswith(".mtn"):
+            filename_plaintexts.add(name)
+            base = name[:-4]
+            filename_plaintexts.update([f"{base}.psb", f"{base}.pimg", f"{base}.png"])
+        else:
+            for ext in (".pimg", ".tlg", ".png", ".psb", ".mtn", ".wmv", ".stand"):
+                filename_plaintexts.add(f"{name}{ext}")
+        count += 1
+    if count:
+        print(f"  [imagepropmap] 提取了 {count} 個資源名")
+
+
+def from_imagedressmap_txt():
+    """從 imagedressmap.txt 提取 .stand 檔名"""
+    seed = "imagedressmap.txt"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    content = safe_read_text(found)
+    if not content:
+        return
+    count = 0
+    for line in content.splitlines():
+        line = line.strip().replace("\ufeff", "")
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        name = parts[0].strip()
+        if name:
+            if not name.endswith(".stand"):
+                filename_plaintexts.add(f"{name}.stand")
+            filename_plaintexts.add(name)
+            count += 1
+    if count:
+        print(f"  [imagedressmap] 提取了 {count} 個 stand 檔名")
+
+
+def from_sysse_ini():
+    """從 sysse.ini 提取系統音效名稱"""
+    seed = "sysse.ini"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    content = safe_read_text(found)
+    if not content:
+        return
+    count = 0
+    for line in content.splitlines():
+        line = line.strip().replace("\ufeff", "")
+        if not line or line.startswith("#") or line.startswith("?"):
+            continue
+        if "=" not in line:
+            continue
+        rhs = line.split("=", 1)[1].strip()
+        if rhs.startswith("@") or rhs.startswith("alias"):
+            continue
+        sound = rhs.split(":")[0].strip()
+        if not sound or " " in sound or sound.startswith("%"):
+            continue
+        for ext in (".ogg", ".ogg.sli", ".opus", ".opus.sli"):
+            filename_plaintexts.add(f"{sound}{ext}")
+        count += 1
+    if count:
+        print(f"  [sysse] 提取了 {count} 個音效名")
+
+
+def from_systrans_ini():
+    """從 systrans.ini 提取轉場 rule 名稱"""
+    seed = "systrans.ini"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    content = safe_read_text(found)
+    if not content:
+        return
+    rules = set()
+    for line in content.splitlines():
+        line = line.strip().replace("\ufeff", "")
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        rhs = line.split("=", 1)[1].strip()
+        if rhs.startswith("@") or rhs.startswith("0:&"):
+            continue
+        for part in rhs.split(":"):
+            part = part.strip()
+            if part and not part.isdigit() and not part.startswith("@"):
+                rules.add(part)
+    count = 0
+    for rule in rules:
+        for ext in (".png", ".pimg", ".tlg", ".psb"):
+            filename_plaintexts.add(f"{rule}{ext}")
+        count += 1
+    if count:
+        print(f"  [systrans] 提取了 {count} 個轉場規則名")
+
+
+def from_tjs_scripts():
+    """從已命名的 .tjs 檔案中提取字串中的檔名引用"""
+    count = 0
+    seen = set()
+    pattern = re.compile(
+        r'["\']([^"\'\s]+\.(?:tjs|ks|ini|csv|txt|png|jpg|tlg|pimg|ogg|mp4|wmv|psb|pbd|stand|sinfo|mtn|stage|toml))["\']'
+    )
+    for xp3_dir in XP3_DIRS:
+        for root, _, files in os.walk(xp3_dir):
+            for f in files:
+                if not f.endswith(".tjs"):
+                    continue
+                fp = os.path.join(root, f)
+                content = safe_read_text(fp)
+                if not content:
+                    continue
+                for m in pattern.finditer(content):
+                    ref = m.group(1)
+                    if "/" in ref:
+                        ref = ref.split("/")[-1]
+                    if ref not in seen:
+                        seen.add(ref)
+                        filename_plaintexts.add(ref)
+                        if ref.endswith(".ks"):
+                            filename_plaintexts.add(f"{ref}.scn")
+                        count += 1
+    if count:
+        print(f"  [tjs_scripts] 提取了 {count} 個檔名引用")
+
+
+def from_locale_files():
+    """從已命名的 locale 檔案推導其他語言變體"""
+    locale_suffixes = ["_cn", "_en", "_tw", "_jp"]
+    locale_bases = set()
+    for xp3_dir in XP3_DIRS:
+        for root, _, files in os.walk(xp3_dir):
+            if "locale" not in root.lower():
+                continue
+            for f in files:
+                if is_file_hash(f):
+                    continue
+                for sfx in locale_suffixes:
+                    idx = f.rfind(sfx + ".")
+                    if idx != -1:
+                        base = f[:idx]
+                        ext = f[idx + len(sfx):]
+                        locale_bases.add((base, ext))
+                        break
+                    idx = f.rfind(sfx)
+                    if idx != -1 and idx == len(f) - len(sfx):
+                        base = f[:idx]
+                        locale_bases.add((base, ""))
+                        break
+    count = 0
+    for base, ext in locale_bases:
+        for sfx in locale_suffixes:
+            fn = f"{base}{sfx}{ext}"
+            filename_plaintexts.add(fn)
+            count += 1
+        # Also add the base without locale suffix
+        fn_base = f"{base}{ext}"
+        filename_plaintexts.add(fn_base)
+    if count:
+        print(f"  [locale_files] 從 {len(locale_bases)} 個基底名生成了 {count} 個語言變體")
+
+
+def from_filegain_csv():
+    """從 filegain.csv 提取音效/BGM 名稱"""
+    seed = "filegain.csv"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    rows = safe_read_csv(found)
+    count = 0
+    for row in rows:
+        if not row:
+            continue
+        name = row[0].replace("\ufeff", "").strip()
+        if name.startswith("#") or not name:
+            continue
+        for ext in (".ogg", ".ogg.sli", ".opus", ".opus.sli", ".mchx", ".mchx.sli"):
+            filename_plaintexts.add(f"{name}{ext}")
+        count += 1
+    if count:
+        print(f"  [filegain] 提取了 {count} 個音效/BGM 名")
+
+
+def from_soundgain_csv():
+    """從 soundgain.csv 提取音效區分名"""
+    seed = "soundgain.csv"
+    fh = get_file_hash(seed)
+    found = find_file_by_hash(fh, seed)
+    if not found:
+        return
+    rows = safe_read_csv(found)
+    count = 0
+    for row in rows:
+        if not row:
+            continue
+        name = row[0].replace("\ufeff", "").strip()
+        if name.startswith("#") or not name:
+            continue
+        # soundgain 主要是分類名，但也可能直接用作音效前綴
+        for ext in (".ogg", ".ogg.sli"):
+            filename_plaintexts.add(f"{name}{ext}")
+        count += 1
+    if count:
+        print(f"  [soundgain] 提取了 {count} 個音效區分名")
+
+
 def from_scn_label_remap():
     """從 TJS const 標籤映射檔中提取 .ks 檔名"""
     count = 0
@@ -1156,6 +1499,18 @@ def main():
         # Step 3: 其他來源
         print("\n[Step 3] 處理其他來源...")
         from_hash_logs()
+        from_scnchartdata_tjs()
+        from_imageevalmap_csv()
+        from_imagenamemap_txt()
+        from_imagemulti_txt()
+        from_imagepropmap_txt()
+        from_imagedressmap_txt()
+        from_sysse_ini()
+        from_systrans_ini()
+        from_tjs_scripts()
+        from_locale_files()
+        from_filegain_csv()
+        from_soundgain_csv()
         from_bgv_csv()
         from_stand_files()
         from_pbd_files()
