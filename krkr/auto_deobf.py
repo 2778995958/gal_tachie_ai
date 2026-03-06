@@ -996,6 +996,45 @@ def from_scn_all_refs():
         print(f"  [scn_refs] 從 SCN 提取了 {len(img_names)} 個圖片、{len(snd_names)} 個音效、{len(scn_names)} 個腳本引用（共 {count} 個候選）")
 
 
+def from_hash_logs():
+    """從遊戲運行時 hash 日誌 (FileNameHash.log / DirectoryHash.log) 提取檔名和路徑"""
+    fn_log = TOOL_DIR / "FileNameHash.log"
+    dir_log = TOOL_DIR / "DirectoryHash.log"
+    fn_count = 0
+    pn_count = 0
+
+    if fn_log.exists():
+        try:
+            with open(fn_log, "r", encoding="utf-16le") as f:
+                for line in f:
+                    line = line.strip().replace("\ufeff", "")
+                    if "##YSig##" not in line:
+                        continue
+                    name = line.split("##YSig##", 1)[0].strip()
+                    if name and name != "%EmptyString%":
+                        filename_plaintexts.add(name)
+                        fn_count += 1
+        except Exception:
+            traceback.print_exc()
+
+    if dir_log.exists():
+        try:
+            with open(dir_log, "r", encoding="utf-16le") as f:
+                for line in f:
+                    line = line.strip().replace("\ufeff", "")
+                    if "##YSig##" not in line:
+                        continue
+                    name = line.split("##YSig##", 1)[0].strip()
+                    if name and name != "%EmptyString%":
+                        pathname_plaintexts.add(name)
+                        pn_count += 1
+        except Exception:
+            traceback.print_exc()
+
+    if fn_count or pn_count:
+        print(f"  [hash_logs] 提取了 {fn_count} 個檔名、{pn_count} 個路徑名")
+
+
 def from_scn_label_remap():
     """從 TJS const 標籤映射檔中提取 .ks 檔名"""
     count = 0
@@ -1041,6 +1080,11 @@ def find_missing_voices():
         for child in Path(xp3_dir).rglob("*"):
             if child.is_file() and child.suffix in (".ogg", ".sli"):
                 handle_vname(child.stem)
+            elif child.is_file() and child.suffix == ".csv" and child.stem.startswith("bgv"):
+                rows = safe_read_csv(str(child))
+                for row in rows:
+                    if row and len(row) > 2 and not row[0].replace("\ufeff", "").startswith("#"):
+                        handle_vname(row[2])
 
     count = 0
     for prefix, (sz, mx) in prefixes_map.items():
@@ -1111,6 +1155,7 @@ def main():
 
         # Step 3: 其他來源
         print("\n[Step 3] 處理其他來源...")
+        from_hash_logs()
         from_bgv_csv()
         from_stand_files()
         from_pbd_files()
