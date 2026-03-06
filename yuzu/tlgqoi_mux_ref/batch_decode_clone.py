@@ -236,18 +236,13 @@ def batch_decode(input_dir, output_dir=None):
 
         print(f"  Got {len(images)} images")
 
-        # Determine index width (2 digits for <100, 3 for >=100)
-        max_idx = max((idx for _, idx in ref_list), default=len(images)-1)
-        idx_width = 3 if max_idx >= 100 else 2
-
         # Save images referenced by TLGref
         saved = set()
         for ref_base, idx in ref_list:
             if idx >= len(images):
                 print(f"  WARNING: {ref_base} idx={idx} out of range")
                 continue
-            suffix = ref_base[len(prefix):]
-            out_name = f"{prefix}_{idx:0{idx_width}d}_{suffix}.png"
+            out_name = f"{ref_base}.png"
             out_path = os.path.join(output_dir, out_name)
             Image.fromarray(images[idx], 'RGBA').save(out_path)
             print(f"  {ref_base}.tlg (idx={idx}) -> {out_name}")
@@ -256,7 +251,7 @@ def batch_decode(input_dir, output_dir=None):
         # Save any images without TLGref
         for idx in range(len(images)):
             if idx not in saved:
-                out_name = f"{prefix}_{idx:0{idx_width}d}.png"
+                out_name = f"{prefix}_{idx}.png"
                 out_path = os.path.join(output_dir, out_name)
                 Image.fromarray(images[idx], 'RGBA').save(out_path)
                 print(f"  (no ref) idx={idx} -> {out_name}")
