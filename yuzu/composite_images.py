@@ -35,48 +35,91 @@ class UniversalFinalEngine:
         print("--- Phase 1: 正在生成所有基礎圖片 (採用多底圖邏輯) ---")
         for scene_name, scene_data in self.scenes.items():
             print(f"\n--- 開始處理場景: {scene_name} ---")
-            
+
             file_prefix = re.sub(r'[a-zA-Z]$', '', scene_name)
-            
+
             # 建立一個從 layer_id 到 layer_info 的快速查找字典
             layer_map = {layer['layer_id']: layer for layer in scene_data['layers']}
 
-            # 第一輪：先處理所有沒有 diff_id 的底圖層
-            base_layers = [l for l in scene_data['layers'] if 'diff_id' not in l]
-            for layer_info in base_layers:
-                output_name = file_prefix + layer_info['name'].lower()
-                output_path = os.path.join(self.output_dir, f"{output_name}.png")
-                img_path = self._get_image_path(scene_name, layer_info['layer_id'])
-                if img_path:
-                    # 使用 Pillow 開啟再儲存，以解決 CRC 不同的問題
-                    Image.open(img_path).convert("RGBA").save(output_path)
-                    print(f"- 已生成底圖: {output_name}.png")
+            # 檢查此場景是否有任何 diff_id
+            has_diff = any('diff_id' in l for l in scene_data['layers'])
 
-            # 第二輪：處理所有有 diff_id 的前景圖層
-            foreground_layers = [l for l in scene_data['layers'] if 'diff_id' in l]
-            for layer_info in foreground_layers:
-                output_name = file_prefix + layer_info['name'].lower()
-                output_path = os.path.join(self.output_dir, f"{output_name}.png")
-                
-                # 找到它對應的底圖層
-                base_layer_info = layer_map.get(layer_info['diff_id'])
-                if not base_layer_info:
-                    print(f"  -> 警告: 找不到 diff_id {layer_info['diff_id']} 對應的底圖層，跳過 {output_name}")
+            if has_diff:
+                # --- 有 diff_id 的場景：使用原本的多底圖邏輯 ---
+                # 第一輪：先處理所有沒有 diff_id 的底圖層
+                base_layers = [l for l in scene_data['layers'] if 'diff_id' not in l]
+                for layer_info in base_layers:
+                    output_name = file_prefix + layer_info['name'].lower()
+                    output_path = os.path.join(self.output_dir, f"{output_name}.png")
+                    img_path = self._get_image_path(scene_name, layer_info['layer_id'])
+                    if img_path:
+                        Image.open(img_path).convert("RGBA").save(output_path)
+                        print(f"- 已生成底圖: {output_name}.png")
+
+                # 第二輪：處理所有有 diff_id 的前景圖層
+                foreground_layers = [l for l in scene_data['layers'] if 'diff_id' in l]
+                for layer_info in foreground_layers:
+                    output_name = file_prefix + layer_info['name'].lower()
+                    output_path = os.path.join(self.output_dir, f"{output_name}.png")
+
+                    base_layer_info = layer_map.get(layer_info['diff_id'])
+                    if not base_layer_info:
+                        print(f"  -> 警告: 找不到 diff_id {layer_info['diff_id']} 對應的底圖層，跳過 {output_name}")
+                        continue
+
+                    base_output_name = file_prefix + base_layer_info['name'].lower()
+                    base_image_path = os.path.join(self.output_dir, f"{base_output_name}.png")
+
+                    fg_image_path = self._get_image_path(scene_name, layer_info['layer_id'])
+
+                    if os.path.exists(base_image_path) and fg_image_path:
+                        base_image = Image.open(base_image_path).convert("RGBA")
+                        fg_image = Image.open(fg_image_path).convert("RGBA")
+
+                        final_canvas = base_image.copy()
+                        final_canvas.paste(fg_image, (layer_info['left'], layer_info['top']), fg_image)
+                        final_canvas.save(output_path)
+                        print(f"- 已生成前景圖: {output_name}.png (底圖: {base_output_name}.png)")
+            else:
+                # --- 無 diff_id 的場景：自動找底圖 ---
+                max_w = scene_data['width']
+                max_h = scene_data['height']
+
+                # 找 left=0, top=0, width=最大, height=最大 的圖層作為底圖
+                auto_base = None
+                for l in scene_data['layers']:
+                    if l['left'] == 0 and l['top'] == 0 and l['width'] == max_w and l['height'] == max_h:
+                        auto_base = l
+                        break
+
+                if not auto_base:
+                    print(f"  -> 警告: 場景 {scene_name} 無 diff_id 且找不到全尺寸底圖，跳過")
                     continue
-                
-                base_output_name = file_prefix + base_layer_info['name'].lower()
-                base_image_path = os.path.join(self.output_dir, f"{base_output_name}.png")
-                
-                fg_image_path = self._get_image_path(scene_name, layer_info['layer_id'])
 
-                if os.path.exists(base_image_path) and fg_image_path:
-                    base_image = Image.open(base_image_path).convert("RGBA")
-                    fg_image = Image.open(fg_image_path).convert("RGBA")
-                    
-                    final_canvas = base_image.copy()
-                    final_canvas.paste(fg_image, (layer_info['left'], layer_info['top']), fg_image)
-                    final_canvas.save(output_path)
-                    print(f"- 已生成前景圖: {output_name}.png (底圖: {base_output_name}.png)")
+                # 先輸出底圖本身
+                base_output_name = file_prefix + auto_base['name'].lower()
+                base_output_path = os.path.join(self.output_dir, f"{base_output_name}.png")
+                base_img_path = self._get_image_path(scene_name, auto_base['layer_id'])
+                if not base_img_path:
+                    print(f"  -> 警告: 底圖檔案不存在，跳過場景 {scene_name}")
+                    continue
+                base_image = Image.open(base_img_path).convert("RGBA")
+                base_image.save(base_output_path)
+                print(f"- 已生成底圖: {base_output_name}.png (自動偵測)")
+
+                # 其他圖層疊加到底圖上
+                for layer_info in scene_data['layers']:
+                    if layer_info['layer_id'] == auto_base['layer_id']:
+                        continue
+                    output_name = file_prefix + layer_info['name'].lower()
+                    output_path = os.path.join(self.output_dir, f"{output_name}.png")
+                    fg_img_path = self._get_image_path(scene_name, layer_info['layer_id'])
+                    if fg_img_path:
+                        fg_image = Image.open(fg_img_path).convert("RGBA")
+                        final_canvas = base_image.copy()
+                        final_canvas.paste(fg_image, (layer_info['left'], layer_info['top']), fg_image)
+                        final_canvas.save(output_path)
+                        print(f"- 已生成前景圖: {output_name}.png (底圖: {base_output_name}.png)")
 
         print("--- Phase 1 完成 ---\n")
 
