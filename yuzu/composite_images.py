@@ -85,18 +85,20 @@ class UniversalFinalEngine:
                 max_w = scene_data['width']
                 max_h = scene_data['height']
 
-                # 找 left=0, top=0, width=最大, height=最大 的圖層作為底圖
-                auto_base = None
-                for l in scene_data['layers']:
-                    if l['left'] == 0 and l['top'] == 0 and l['width'] == max_w and l['height'] == max_h:
-                        auto_base = l
-                        break
+                # 找所有全尺寸圖層 (left=0, top=0, width=最大, height=最大)
+                full_size_layers = [
+                    l for l in scene_data['layers']
+                    if l['left'] == 0 and l['top'] == 0 and l['width'] == max_w and l['height'] == max_h
+                ]
 
-                if not auto_base:
+                if not full_size_layers:
                     print(f"  -> 警告: 場景 {scene_name} 無 diff_id 且找不到全尺寸底圖，跳過")
                     continue
 
-                # 先輸出底圖本身
+                # 底圖 = layers 陣列中最後一個全尺寸圖層（圖層堆疊最底部）
+                auto_base = full_size_layers[-1]
+
+                # 載入底圖
                 base_output_name = file_prefix + auto_base['name'].lower()
                 base_output_path = os.path.join(self.output_dir, f"{base_output_name}.png")
                 base_img_path = self._get_image_path(scene_name, auto_base['layer_id'])
@@ -105,21 +107,23 @@ class UniversalFinalEngine:
                     continue
                 base_image = Image.open(base_img_path).convert("RGBA")
                 base_image.save(base_output_path)
-                print(f"- 已生成底圖: {base_output_name}.png (自動偵測)")
+                print(f"- 已生成底圖: {base_output_name}.png (自動偵測，堆疊最底層)")
 
-                # 其他圖層疊加到底圖上
                 for layer_info in scene_data['layers']:
                     if layer_info['layer_id'] == auto_base['layer_id']:
                         continue
                     output_name = file_prefix + layer_info['name'].lower()
                     output_path = os.path.join(self.output_dir, f"{output_name}.png")
                     fg_img_path = self._get_image_path(scene_name, layer_info['layer_id'])
-                    if fg_img_path:
-                        fg_image = Image.open(fg_img_path).convert("RGBA")
-                        final_canvas = base_image.copy()
-                        final_canvas.paste(fg_image, (layer_info['left'], layer_info['top']), fg_image)
-                        final_canvas.save(output_path)
-                        print(f"- 已生成前景圖: {output_name}.png (底圖: {base_output_name}.png)")
+                    if not fg_img_path:
+                        continue
+
+                    # 所有非底圖圖層都疊加到底圖上
+                    fg_image = Image.open(fg_img_path).convert("RGBA")
+                    final_canvas = base_image.copy()
+                    final_canvas.paste(fg_image, (layer_info['left'], layer_info['top']), fg_image)
+                    final_canvas.save(output_path)
+                    print(f"- 已生成前景圖: {output_name}.png (底圖: {base_output_name}.png)")
 
         print("--- Phase 1 完成 ---\n")
 
