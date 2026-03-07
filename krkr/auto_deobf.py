@@ -883,19 +883,48 @@ def bruteforce_ev_sd():
 
 def from_ending_and_locale_variants():
     """從已知檔名推導 ending roll、edthum、opthum 等地區變體"""
-    # 角色短名和全名對應
-    char_short = ["azu", "eri", "miu", "nic", "rio"]
-    char_full = ["azusa", "elina", "miu", "nicola", "rio"]
     locales = ["jp", "en", "cn", "tw"]
     count = 0
 
-    # edthum_{char}_{locale}.png
-    for ch in char_short:
+    # 自動收集 edthum_{name} 基底名
+    edthum_names = set()
+    # 自動收集 ed_{name}_roll 基底名（硬寫 fallback：全名無法從設定檔推導）
+    ed_roll_names = {"azusa", "elina", "miu", "nicola", "rio"}
+    # 自動收集 route_{name} 基底名
+    route_names = set()
+
+    for fn in list(filename_plaintexts):
+        m = re.match(r"^edthum_([a-z]+?)(?:_(?:jp|en|cn|tw))?\.(?:png|psb)$", fn)
+        if m:
+            edthum_names.add(m.group(1))
+        m = re.match(r"^ed_([a-z]+)_roll", fn)
+        if m:
+            ed_roll_names.add(m.group(1))
+        m = re.match(r"^route_([a-z]+?)(?:_(?:jp|en|cn|tw))?\.ks", fn)
+        if m:
+            route_names.add(m.group(1))
+
+    for xp3_dir in XP3_DIRS:
+        for root, _, files in os.walk(xp3_dir):
+            for f in files:
+                m = re.match(r"^edthum_([a-z]+?)(?:_(?:jp|en|cn|tw))?\.(?:png|psb)$", f)
+                if m:
+                    edthum_names.add(m.group(1))
+                m = re.match(r"^ed_([a-z]+)_roll", f)
+                if m:
+                    ed_roll_names.add(m.group(1))
+                m = re.match(r"^route_([a-z]+?)(?:_(?:jp|en|cn|tw))?\.ks", f)
+                if m:
+                    route_names.add(m.group(1))
+
+    # edthum_{name}_{locale}.png
+    for ch in edthum_names:
         for loc in locales:
             filename_plaintexts.update([
                 f"edthum_{ch}_{loc}.png", f"edthum_{ch}_{loc}.psb",
+                f"edthum_{ch}.png", f"edthum_{ch}.psb",
             ])
-            count += 2
+            count += 4
 
     # opthum_{locale}.png
     for loc in locales:
@@ -904,8 +933,8 @@ def from_ending_and_locale_variants():
         ])
         count += 2
 
-    # ed_{fullname}_roll: .tjs + _{locale}.ini + _{locale}.png + _{locale}_{000-120}.png
-    for ch in char_full:
+    # ed_{name}_roll: .tjs + _{locale}.ini + _{locale}.png + _{locale}_{000-150}.png
+    for ch in ed_roll_names:
         filename_plaintexts.add(f"ed_{ch}_roll.tjs")
         count += 1
         for loc in locales:
@@ -919,8 +948,8 @@ def from_ending_and_locale_variants():
                 filename_plaintexts.add(f"{base}_{n:03d}.png")
                 count += 2
 
-    # route_{char}_{locale}.ks.scn
-    for ch in char_short:
+    # route_{name}_{locale}.ks.scn
+    for ch in route_names:
         for loc in locales:
             filename_plaintexts.add(f"route_{ch}_{loc}.ks.scn")
             count += 1
@@ -952,7 +981,8 @@ def from_ending_and_locale_variants():
                         count += 1
 
     if count:
-        print(f"  [locale_variants] 生成了 {count} 個地區變體檔名")
+        print(f"  [locale_variants] 生成了 {count} 個地區變體檔名"
+              f"（edthum:{len(edthum_names)} ed_roll:{len(ed_roll_names)} route:{len(route_names)}）")
 
 
 def from_scn_all_refs():
