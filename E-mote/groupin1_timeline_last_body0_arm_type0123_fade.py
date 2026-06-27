@@ -5,21 +5,27 @@ import os
 def merge_timelines(input_path):
     """
     將包含多個時間軸的 JSON 檔案合併。
-    終極客製化 + 雙重 Auto 版
+    多組順序疊加版：支援 arm_type 與 fade_* 依組別連續串接
     """
     
-    # 💡 【在這邊修改你要的 arm_type 順序與組合】
-    # 現在這裡也可以填入 "auto" 了！它會自動抓取原本檔案的 arm_type 數值。
-    # 例如：arm_list = ["auto"] 或是 arm_list = [1, "auto"]
-    arm_list = ["auto"] 
-    
-    # 💡 【在這邊設定你想要的 fade 客製化數值】
-    # 填入數字（如 0, 1）：強制覆蓋。
-    # 填入 "auto"：交由系統自動讀取原始檔案數值（若無則補 0）。
-    fade_custom_settings = {
-        "fade_a": "auto",
-        "fade_b": "auto",
-    }
+    # 💡 【在這邊設定你每一組動作的標籤數值】
+    # 每一行 {} 代表一組動作（一個循環），程式會自動依序往後疊加！
+    # 數值可以填數字（如 0, 1）或 "auto"（自動抓取原始檔案值）
+    groups_config = [
+        {
+            "arm_type": "auto", 
+            "fade": {"fade_a": 1, "fade_b": 0}
+        },
+        {
+            "arm_type": "auto", 
+            "fade": {"fade_a": 0, "fade_b": 1}
+        },
+        # 如果你想疊加第三組、第四組，只要照抄格式在下方增加即可，例如：
+        # {
+        #     "arm_type": 2, 
+        #     "fade": {"fade_a": "auto", "fade_b": 1}
+        # }
+    ]
     
     # --- 1. 讀取並驗證輸入檔案 ---
     print(f"開始處理檔案：'{input_path}'")
@@ -52,9 +58,10 @@ def merge_timelines(input_path):
             if 'label' in variable:
                 all_labels.add(variable['label'])
     
-    # 確保客製化的 fade 標籤一定會被包含在處理清單中
-    for custom_label in fade_custom_settings.keys():
-        all_labels.add(custom_label)
+    # 確保所有自訂組別裡有寫到的 fade 標籤也一定會被包含進去
+    for config in groups_config:
+        for custom_label in config.get("fade", {}).keys():
+            all_labels.add(custom_label)
         
     all_labels.add('arm_type')
     sorted_labels = sorted(list(all_labels))
@@ -62,8 +69,12 @@ def merge_timelines(input_path):
     # 在最外層宣告容器
     merged_variables_data = {label: [] for label in sorted_labels}
 
-    # --- 4. 核心轉換邏輯 ---
-    for loop_idx, arm_val in enumerate(arm_list):
+    # --- 4. 核心轉換邏輯：動態多組首尾串聯 ---
+    for loop_idx, config in enumerate(groups_config):
+        # 取得當前組別的個別設定
+        arm_val = config.get("arm_type", "auto")
+        current_fade_settings = config.get("fade", {})
+        
         for time_index, timeline in enumerate(processed_timelines):
             
             global_time = (loop_idx * single_loop_frames) + time_index
@@ -74,11 +85,11 @@ def merge_timelines(input_path):
             }
 
             for label in sorted_labels:
-                # 白名單過濾
+                # 白名單過濾：只留 face, fade, arm_type
                 if not (label.startswith('face') or label.startswith('fade') or label == 'arm_type'):
                     continue
                 
-                # 【優化】arm_type 判斷：只有當 arm_val 不是 "auto" 時才強制寫入固定值
+                # arm_type 判斷：若當前組別不是 "auto" 則強制寫入指定值
                 if label == 'arm_type' and arm_val != "auto":
                     new_frame = {
                         "time": global_time,
@@ -88,9 +99,9 @@ def merge_timelines(input_path):
                     merged_variables_data[label].append(new_frame)
                     continue
 
-                # 檢查是否為客製化的 fade 標籤，且排除 "auto"
-                if label.startswith('fade') and label in fade_custom_settings and fade_custom_settings[label] != "auto":
-                    custom_val = fade_custom_settings[label]
+                # fade 判斷：若當前組別有指定該 fade 標籤且不是 "auto"，則強制寫入指定值
+                if label.startswith('fade') and label in current_fade_settings and current_fade_settings[label] != "auto":
+                    custom_val = current_fade_settings[label]
                     new_frame = {
                         "time": global_time,
                         "content": {"value": custom_val, "easing": 0},
@@ -99,7 +110,7 @@ def merge_timelines(input_path):
                     merged_variables_data[label].append(new_frame)
                     continue
 
-                # 這裡處理：face、設定為 "auto" 的 fade、以及當 arm_list 填了 "auto" 時的 arm_type
+                # 其餘狀況（face、設定為 "auto" 的標籤、或原本檔案有的其他 fade 標籤）：智慧擷取
                 target_frame = None
                 if label in variables_in_timeline:
                     frames = variables_in_timeline[label]
@@ -124,8 +135,8 @@ def merge_timelines(input_path):
                 
                 merged_variables_data[label].append(new_frame)
 
-    # --- 5. 建立最終的輸出結構 ---
-    total_frames = len(arm_list) * single_loop_frames
+    # --- 5. 建立最終的輸出結構與總結尾標記 ---
+    total_frames = len(groups_config) * single_loop_frames
     final_variable_list = []
     
     for label, frame_list in merged_variables_data.items():
@@ -135,7 +146,7 @@ def merge_timelines(input_path):
                 "content": None,
                 "type": 0
             })
-        final_variable_list.append({"label": label, "frameList": frame_list})
+            final_variable_list.append({"label": label, "frameList": frame_list})
 
     output_data = {
         "id": "emote_timeline",
@@ -156,7 +167,7 @@ def merge_timelines(input_path):
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(output_data, f, ensure_ascii=False, indent=1)
-        print(f"轉換成功！已動態產生共 {len(arm_list)} 組串接動作。結果已儲存至 '{output_path}'")
+        print(f"轉換成功！已動態產生共 {len(groups_config)} 組串接動作。結果已儲存至 '{output_path}'")
         return True
     except Exception as e:
         print(f"寫入檔案時發生錯誤：{e}")
