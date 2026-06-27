@@ -13,7 +13,7 @@ OUTPUT_FOLDER = "output"
 OPERATION_MODE = "copy"
 
 # ==============================================================================
-# --- 核心函式 (get_hash_for_grouping 已更新) ---
+# --- 核心函式 ---
 # ==============================================================================
 
 def find_timeline_control_recursively(data_structure):
@@ -32,22 +32,19 @@ def find_timeline_control_recursively(data_structure):
 
 def get_hash_for_grouping(file_path):
     """
-    【最新版】讀取 timeline 檔案，只提取所有 "diff": 0 的物件，
+    讀取 timeline 檔案，只提取所有 "diff": 0 的物件，
     然後對這個集合計算標準化的 hash。
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             timeline_list = json.load(f)
         
-        # 確保我們處理的是一個列表
         if not isinstance(timeline_list, list):
             return None
 
-        # 步驟 1: 只篩選出 "diff": 0 的物件
+        # 篩選出 "diff": 0 的物件
         diff0_objects = [obj for obj in timeline_list if isinstance(obj, dict) and obj.get("diff") == 0]
         
-        # 如果沒有任何 "diff": 0 的物件，也算是一種有效的狀態
-        # 步驟 2: 對篩選後的結果進行標準化並計算 hash
         canonical_string = json.dumps(diff0_objects, sort_keys=True, separators=(',', ':'))
         
         hasher = hashlib.md5()
@@ -58,7 +55,7 @@ def get_hash_for_grouping(file_path):
         return None
 
 # ==============================================================================
-# --- 流程主體 (已更新為呼叫新的 hash 函數) ---
+# --- 流程主體 ---
 # ==============================================================================
 
 def run_extraction_phase():
@@ -84,7 +81,7 @@ def run_extraction_phase():
     print(f"提取完成！成功生成 {success_count} 個 timeline 檔案，跳過 {skipped_count} 個檔案。")
 
 def run_grouping_phase():
-    """階段二：根據 "diff": 0 的內容進行分組。"""
+    """階段二：根據 "diff": 0 的內容進行分組 (支援多種 MMO 擴充檔名)。"""
     print("\n--- 階段二：開始進行檔案分組 (精準比對模式) ---")
     
     timeline_folder_full = os.path.join(BASE_FOLDER, TIMELINE_TEMP_FOLDER)
@@ -96,7 +93,6 @@ def run_grouping_phase():
     for filename in os.listdir(timeline_folder_full):
         if filename.endswith("_timeline.json"):
             file_path = os.path.join(timeline_folder_full, filename)
-            # 【已更新】呼叫新的 hash 函數
             file_hash = get_hash_for_grouping(file_path)
             if file_hash:
                 if file_hash not in content_groups: content_groups[file_hash] = []
@@ -123,15 +119,41 @@ def run_grouping_phase():
         print(f"  🗂️  正在處理 '{group_folder_name}' (包含 {len(file_list_basenames)} 個檔案)...")
         
         for timeline_basename in file_list_basenames:
+            # 搬移時間軸檔案
             timeline_path = os.path.join(timeline_folder_full, timeline_basename)
             action_func(timeline_path, group_time_path)
+            
+            # 取得主檔名 (例如: "character" 或 "character.FreeMote")
             base_name = timeline_basename.replace("_timeline.json", "")
-            mmo_filename = f"{base_name}.mmo"
-            mmo_source_path = os.path.join(MMO_FOLDER_PATH, mmo_filename)
-            if os.path.exists(mmo_source_path):
+            
+            # 移除可能重複帶有的 .FreeMote，取得純粹的主檔名
+            pure_base_name = base_name[:-9] if base_name.endswith(".FreeMote") else base_name
+            
+            # 【全新優化】建立多種 MMO 檔名的候選名單，進行彈性比對
+            mmo_candidates = [
+                f"{base_name}.mmo",                 # 依原本檔名
+                f"{pure_base_name}.FreeMote.mmo",   # 強制加上 .FreeMote
+                f"{pure_base_name}.mmo"             # 純粹的 .mmo
+            ]
+            # 移除清單中重複的檔名以提升效率
+            mmo_candidates = list(dict.fromkeys(mmo_candidates))
+            
+            # 尋找真實存在的 MMO 檔案
+            mmo_source_path = None
+            found_filename = None
+            for candidate in mmo_candidates:
+                candidate_path = os.path.join(MMO_FOLDER_PATH, candidate)
+                if os.path.exists(candidate_path):
+                    mmo_source_path = candidate_path
+                    found_filename = candidate
+                    break
+            
+            # 執行搬移/複製
+            if mmo_source_path:
                 action_func(mmo_source_path, group_mmo_path)
             else:
-                print(f"    ⚠️ 警告：找不到對應的 MMO 檔案: {mmo_filename}")
+                print(f"    ⚠️ 警告：找不到對應的 MMO 檔案 (嘗試過: {', '.join(mmo_candidates)})")
+                
         group_counter += 1
     print("分組完成！")
 
