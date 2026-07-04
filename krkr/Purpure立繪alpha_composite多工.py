@@ -287,10 +287,16 @@ def submit_face_combinations(executor, futures, face_rule_dict, base_layers, pri
         
         if not all_paths_found: continue
 
-        # --- 【核心修正】不使用 Top 排序，依照列表順序組合 ---
-        # 順序：[Base(通常是身體)] + [Face(表情)] + [Priority(面具/前髮)] + [Overlay(其餘衣服)]
-        # 這是最經典的「三明治」堆疊法，也是舊版 Purpure 的邏輯基礎
-        ordered_ids = base_layers + face_layers_ids + priority_overlays + final_overlays
+        # ==================== 【程式夥伴修正：對照總表並反轉為「底到面」】 ====================
+        # 1. 把這次拼裝出來的所有五官 ID 變成一個集合
+        face_id_set = set(face_layers_ids)
+        
+        # 2. 直接去對照總表 (layer_df) 裡的先天順序，並且加上 [::-1] 徹底倒過來（變成 ほほ -> 口 -> 目 -> 眉）
+        sorted_face_layers_ids = [int(lid) for lid in layer_df['layer_id'].values if lid in face_id_set][::-1]
+        
+        # 3. 依照正確的底面順序拼接
+        ordered_ids = base_layers + sorted_face_layers_ids + priority_overlays + final_overlays
+        # ==============================================================================
         
         layers_to_draw = []
         missing = False

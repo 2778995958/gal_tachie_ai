@@ -265,9 +265,18 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
             face_layers.append(lid)
 
         if not all_paths_found: continue
-        sorted_face_paths = sorted(face_paths, key=lambda p: normalize_path_string(p).count('_'), reverse=True)
-        sorted_face_layers = [path_to_id.get(normalize_path_string(p)) for p in sorted_face_paths]
+        
+        # ==================== 【程式夥伴修正：將總表順序反轉為「底到面」】 ====================
+        # 1. 把這次點單需要用到的所有五官 ID 變成一個集合
+        face_id_set = set(face_layers)
+        
+        # 2. 關鍵修正：因為 .txt 總表是由「面到底」排列，而 Python 需要「底到面」
+        #    所以在最後加上 [::-1] 把順序整條倒過來！變成了 (ほほ -> 口 -> 目 -> 眉)
+        sorted_face_layers = [int(lid) for lid in layer_df['layer_id'].values if lid in face_id_set][::-1]
+        
+        # 3. 完美組合：衣服底層 + 倒過來變正確的五官 + 最上層配件
         final_layers = base_layers + sorted_face_layers + priority_overlays + final_overlays
+        # ==============================================================================
         existing_layers_info, missing_parts_log = [], []
         for lid in final_layers:
             if lid is None: continue
