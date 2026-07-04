@@ -1,4 +1,7 @@
-# 【Ver 33.0】 多線程版本
+# 【最終典藏完整還原版 - yuzu專用 Ver. 34.0】
+# 特點：保留原版任務收集型多執行緒架構，完美還原吉里吉里 # (姿勢)、@ (服裝)、* (模糊匹配) 與 ! (取反) 邏輯。
+# 圖片堆疊順序完全依照 Sinfo 列表對照總表的先天層級邏輯 [::-1]，確保 ほほ 在底，眉 在面。
+
 import pandas as pd
 from PIL import Image
 import os
@@ -17,11 +20,59 @@ MAX_WORKERS = os.cpu_count() or 4  # 多線程數量，預設為 CPU 核心數
 # ==============================================================================
 
 
-# --- 1. 資料讀取與預處理 ---
+# --- 1. 條件判定核心輔助函數 (還原 TJS2 foreMatch 邏輯) ---
+def matches_single_condition(current_val, cond_val):
+    """檢查單個條件是否符合，支援 ! 取反與 * 字首模糊匹配"""
+    is_negated = cond_val.startswith('!')
+    if is_negated: 
+        cond_val = cond_val[1:]
+    
+    if cond_val.endswith('*'):
+        prefix = cond_val[:-1]
+        match = current_val.startswith(prefix)
+    else:
+        match = (current_val == cond_val)
+        
+    return not match if is_negated else match
+
+def evaluate_face_condition(condition_str, dress_name, diff_id):
+    """解析並評估複合條件字串，例如 '#手胸@パジャマ１' 或 '#手*'"""
+    if not condition_str: 
+        return True
+        
+    pose_cond = None
+    dress_cond = None
+    
+    # 拆解 # (姿勢) 與 @ (服裝)
+    if '#' in condition_str and '@' in condition_str:
+        hash_idx = condition_str.index('#')
+        at_idx = condition_str.index('@')
+        if hash_idx < at_idx:
+            pose_cond = condition_str[hash_idx+1:at_idx].strip()
+            dress_cond = condition_str[at_idx+1:].strip()
+        else:
+            dress_cond = condition_str[at_idx+1:hash_idx].strip()
+            pose_cond = condition_str[hash_idx+1:].strip()
+    elif '#' in condition_str:
+        pose_cond = condition_str[condition_str.index('#')+1:].strip()
+    elif '@' in condition_str:
+        dress_cond = condition_str[condition_str.index('@')+1:].strip()
+        
+    # 驗證姿勢條件
+    if pose_cond and not matches_single_condition(diff_id, pose_cond): 
+        return False
+    # 驗證服裝條件
+    if dress_cond and not matches_single_condition(dress_name, dress_cond): 
+        return False
+        
+    return True
+
+
+# --- 2. 資料讀取與預處理 ---
 def normalize_path_string(path_str):
     """一個統一處理路徑字串的輔助函數"""
     # 替換斜線 -> 移除半形空白 -> 移除全形空白
-    return path_str.replace('/', '_').replace(' ', '').replace('　', '')
+    return path_str.replace('/', '_').replace(' ', '').replace(' ', '')
 
 def load_layer_data_with_paths(filepath):
     print(f"[INFO] 正在解析 '{filepath}'...")
@@ -76,10 +127,10 @@ def load_sinfo_data_manual(filepath):
                 if not row: continue
                 rule_type = row[0].strip()
                 if rule_type == 'dress' and len(row) >= 5:
-                    rule_path = row[4].strip() # <<< 修改：暫時只清除頭尾空白，讓原始路徑保留
+                    rule_path = row[4].strip() 
                     rules.append({'type': 'dress', 'name': row[1].strip(), 'id': row[3].strip(), 'path': rule_path})
                 elif rule_type == 'face' and len(row) >= 4:
-                    rule_path = row[3].strip() # <<< 修改：暫時只清除頭尾空白，讓原始路徑保留
+                    rule_path = row[3].strip() 
                     rules.append({'type': 'face', 'name': row[1].strip(), 'path': rule_path})
         print(f"[INFO] '{filepath}' 解析成功，載入 {len(rules)} 條規則。")
         return rules
@@ -87,7 +138,7 @@ def load_sinfo_data_manual(filepath):
         print(f"[錯誤] 手動解析 '{filepath}' 時發生問題: {e}")
         return []
 
-# --- 2. 影像合成核心邏輯 ---
+# --- 3. 影像合成核心邏輯 ---
 _print_lock = threading.Lock()
 
 def create_composite_image_relative(existing_layers_info, output_path, log_file):
@@ -98,6 +149,10 @@ def create_composite_image_relative(existing_layers_info, output_path, log_file)
         base_x, base_y = base_info['left'], base_info['top']
         min_x, min_y, max_x, max_y = 0, 0, base_info['width'], base_info['height']
         for part_info in existing_layers_info[1:]:
+            # === 💡 程式夥伴優化：如果是空資料夾或錨點(寬高為0)，直接跳過，不影響畫布大小 ===
+            if part_info['width'] == 0 or part_info['height'] == 0:
+                continue
+            # ====================================================================
             dx, dy = part_info['left'] - base_x, part_info['top'] - base_y
             min_x, min_y = min(min_x, dx), min(min_y, dy)
             max_x, max_y = max(max_x, dx + part_info['width']), max(max_y, dy + part_info['height'])
@@ -124,7 +179,7 @@ def create_composite_image_relative(existing_layers_info, output_path, log_file)
             print(f"  [錯誤] 合成圖片時發生未知問題: {e}")
         return False
 
-# --- 3. 核心處理邏輯 (此區塊無變更) ---
+# --- 4. 核心處理邏輯 ---
 def log_missing_assets(layer_df, char_base_name, log_file):
     print(f"[INFO] 正在進行素材完整性檢查...")
     log_file.write(f"\n--- 素材檔案完整性檢查 ---\n")
@@ -162,17 +217,28 @@ def process_character(txt_path, sinfo_path, log_file):
         print(f"[INFO] 掃描完成，發現 {len(generated_filenames_set)} 個已生成檔案。")
     path_to_id = pd.Series(layer_df.layer_id.values, index=layer_df.full_path).to_dict()
     id_to_path = {v: k for k, v in path_to_id.items()}
-    dress_rules, face_rules, conditional_faces = defaultdict(lambda: defaultdict(list)), defaultdict(list), defaultdict(lambda: defaultdict(dict))
+    
+    # 規則結構最佳化
+    dress_rules = defaultdict(lambda: defaultdict(list))
+    face_rules = defaultdict(list)
+    conditional_faces = defaultdict(list) # 儲存 (condition_str, path) 的列表
+    
     for rule in sinfo_rules:
         if rule['type'] == 'dress':
             dress_rules[rule['name']][rule['id']].append(rule['path'])
         elif rule['type'] == 'face':
-            if '@' in rule['name']:
-                face_name, condition = rule['name'].split('@', 1)
-                if condition not in conditional_faces[face_name]: conditional_faces[face_name][condition] = []
-                conditional_faces[face_name][condition].append(rule['path'])
+            raw_name = rule['name']
+            cond_idx = len(raw_name)
+            if '#' in raw_name: cond_idx = min(cond_idx, raw_name.index('#'))
+            if '@' in raw_name: cond_idx = min(cond_idx, raw_name.index('@'))
+            
+            face_name = raw_name[:cond_idx].strip()
+            condition_str = raw_name[cond_idx:].strip()
+            
+            if condition_str:
+                conditional_faces[face_name].append((condition_str, rule['path']))
             else:
-                face_rules[rule['name']].append(rule['path'])
+                face_rules[face_name].append(rule['path'])
 
     # 收集所有待處理任務
     pending_tasks = []
@@ -180,7 +246,7 @@ def process_character(txt_path, sinfo_path, log_file):
         for diff_id, dress_paths in diffs.items():
             current_dress_key = f"{dress_name}_{diff_id}"
             print(f"\n--- 正在收集組合: {dress_name} (版本: {diff_id}) ---")
-            # <<< 修改：查找時才進行標準化
+            
             base_dress_layers_ids = [path_to_id.get(normalize_path_string(p)) for p in dress_paths]
             valid_ids = frozenset(lid for lid in base_dress_layers_ids if lid is not None)
             if not valid_ids:
@@ -188,18 +254,26 @@ def process_character(txt_path, sinfo_path, log_file):
                 continue
             priority_overlay_ids, other_dress_ids = [], []
             for p in dress_paths:
-                # <<< 修改：查找時才進行標準化
                 lid = path_to_id.get(normalize_path_string(p))
+                if lid is None: continue
                 if p in PRIORITY_OVERLAY_PATHS: priority_overlay_ids.append(lid)
                 else: other_dress_ids.append(lid)
             special_dress_parts = [lid for lid in other_dress_ids if lid in SPECIAL_UNDERLAY_IDS]
             normal_dress_parts = [lid for lid in other_dress_ids if lid not in SPECIAL_UNDERLAY_IDS]
             base_layers_for_comp, overlay_layers_for_comp = (normal_dress_parts[:1] + special_dress_parts + normal_dress_parts[:1], normal_dress_parts[1:]) if special_dress_parts and normal_dress_parts else (normal_dress_parts[:1], normal_dress_parts[1:])
+            
+            # 1. 提交普通表情
             process_face_combinations(face_rules, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, id_to_path, layer_df, char_base_name, current_dress_key, generated_filenames_set, log_file, output_folder, pending_tasks)
-            for face_name, conditions in conditional_faces.items():
-                for condition, face_paths in conditions.items():
-                    if matches_condition(dress_name, condition):
-                        process_face_combinations({face_name: face_paths}, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, id_to_path, layer_df, char_base_name, f"{current_dress_key}@{condition}", generated_filenames_set, log_file, output_folder, pending_tasks)
+            
+            # 2. 精確篩選並提交成立的條件表情
+            current_active_conditional_faces = defaultdict(list)
+            for face_name, rules_list in conditional_faces.items():
+                for condition_str, path in rules_list:
+                    if evaluate_face_condition(condition_str, dress_name, diff_id):
+                        current_active_conditional_faces[face_name].append(path)
+                        
+            for face_name, face_paths in current_active_conditional_faces.items():
+                process_face_combinations({face_name: face_paths}, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, id_to_path, layer_df, char_base_name, f"{current_dress_key}_cond", generated_filenames_set, log_file, output_folder, pending_tasks)
 
     # 多線程執行圖片合成
     total_tasks = len(pending_tasks)
@@ -224,59 +298,36 @@ def process_character(txt_path, sinfo_path, log_file):
     print(f"\n[INFO] 合成完成：成功 {success_count}/{total_tasks} 張")
     print(f"{'='*20} 角色: {char_base_name} 處理完成 {'='*20}")
 
-def matches_condition(dress_name, condition):
-    is_negated = condition.startswith('!')
-    if is_negated: condition = condition[1:]
-    match = dress_name.startswith(condition[:-1]) if condition.endswith('*') else (dress_name == condition)
-    return not match if is_negated else match
-
 def process_face_combinations(face_rule_dict, base_layers, priority_overlays, final_overlays, path_to_id, id_to_path, layer_df, char_base_name, dress_info_str, generated_filenames_set, log_file, output_folder, pending_tasks):
     for face_name, face_paths in face_rule_dict.items():
         combination_context = f"組合 '{dress_info_str} + {face_name}'"
         face_layers, all_paths_found = [], True
+        
+        # 支援路徑字首 * 模糊匹配的多圖層批量抓取 (注意 yuzu 使用 _ 標準化)
         for p in face_paths:
-            lookup_path = normalize_path_string(p)
-            lid = path_to_id.get(lookup_path)
-            if lid is None:
-                # <<< 核心修改：新增偵錯模式 >>>
-                log_file.write(f"[路徑查找失敗] {combination_context}: 原始部件路徑 '{p}' 在 .txt 中找不到。\n")
-
-                if not hasattr(process_face_combinations, 'debug_printed'):
-                    print("\n--- [程式夥伴] 偵錯模式已啟動 ---")
-                    print(f"‼️  路徑查找失敗！")
-                    print(f"    - 原始路徑 (.sinfo): '{p}'")
-                    print(f"    - 標準化後用於查找: '{lookup_path}'")
-                    print(f"    - 但在從 .txt 建立的路徑字典中找不到此鍵。")
-
-                    parent_folder_name = lookup_path.split('_')[0]
-                    print(f"    - 以下是字典中一些以 '{parent_folder_name}' 開頭的鍵，請仔細比對，找出字元的微小差異：")
-
-                    similar_keys = [key for key in path_to_id.keys() if key.startswith(parent_folder_name)]
-                    if not similar_keys:
-                        print("      - (字典中找不到任何以該名稱開頭的鍵，請檢查 .sinfo 中的資料夾名稱是否正確)")
-                    else:
-                        for i, key in enumerate(similar_keys[:20]):
-                            print(f"      - 字典鍵 #{i+1}: '{key}'")
-
-                    print("--- 偵錯結束 (此訊息只會顯示一次) ---\n")
-                    process_face_combinations.debug_printed = True
-                # <<< 偵錯碼結束 >>>
-                all_paths_found = False
-            face_layers.append(lid)
+            if '*' in p:
+                lookup_prefix = normalize_path_string(p.replace('*', ''))
+                matched_lids = [lid for full_path, lid in path_to_id.items() if full_path.startswith(lookup_prefix)]
+                if matched_lids:
+                    face_layers.extend(matched_lids)
+                else:
+                    all_paths_found = False
+            else:
+                lookup_path = normalize_path_string(p)
+                lid = path_to_id.get(lookup_path)
+                if lid is None:
+                    log_file.write(f"[路徑查找失敗] {combination_context}: 原始部件路徑 '{p}' 在 .txt 中找不到。\n")
+                    all_paths_found = False
+                else:
+                    face_layers.append(lid)
 
         if not all_paths_found: continue
         
-        # ==================== 【程式夥伴修正：將總表順序反轉為「底到面」】 ====================
-        # 1. 把這次點單需要用到的所有五官 ID 變成一個集合
+        # 對照總表先天層級順序，並加上 [::-1] 倒序（確保 ほほ 在底，眉 在面）
         face_id_set = set(face_layers)
-        
-        # 2. 關鍵修正：因為 .txt 總表是由「面到底」排列，而 Python 需要「底到面」
-        #    所以在最後加上 [::-1] 把順序整條倒過來！變成了 (ほほ -> 口 -> 目 -> 眉)
         sorted_face_layers = [int(lid) for lid in layer_df['layer_id'].values if lid in face_id_set][::-1]
         
-        # 3. 完美組合：衣服底層 + 倒過來變正確的五官 + 最上層配件
         final_layers = base_layers + sorted_face_layers + priority_overlays + final_overlays
-        # ==============================================================================
         existing_layers_info, missing_parts_log = [], []
         for lid in final_layers:
             if lid is None: continue
@@ -288,10 +339,12 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
                     existing_layers_info.append(info)
                 else:
                     missing_parts_log.append(f"'{id_to_path.get(lid, '未知')}'({lid})")
+                    
         if not existing_layers_info or (final_layers and final_layers[0] is not None and existing_layers_info[0].get('layer_id') != final_layers[0]):
             if final_layers and final_layers[0] is not None:
                 log_file.write(f"[基礎檔案缺失] {combination_context}: 基礎圖層 '{id_to_path.get(final_layers[0], '未知')}'({final_layers[0]}) 的圖片不存在，組合跳過。\n")
             continue
+            
         final_used_ids = [info['layer_id'] for info in existing_layers_info]
         id_string = "_".join(map(str, final_used_ids))
         output_filename = f"{char_base_name}_{id_string}.png"
@@ -300,13 +353,14 @@ def process_face_combinations(face_rule_dict, base_layers, priority_overlays, fi
             continue
         if missing_parts_log:
             log_file.write(f"[部件缺失] {combination_context}: 正在生成，但跳過了不存在的部件: {', '.join(missing_parts_log)}\n")
+            
         char_output_folder = os.path.join(output_folder, char_base_name)
         if not os.path.exists(char_output_folder): os.makedirs(char_output_folder)
         output_path = os.path.join(char_output_folder, output_filename)
         generated_filenames_set.add(output_filename)
         pending_tasks.append((existing_layers_info, output_path, combination_context, output_filename))
 
-# --- 4. 程式主入口 (此區塊無變更) ---
+# --- 5. 程式主入口 ---
 if __name__ == '__main__':
     LOG_FILENAME = "generation_log.txt"
     print(f"程式啟動：自動掃描檔案配對... 錯誤日誌將寫入 {LOG_FILENAME}")

@@ -1,6 +1,6 @@
-# 【最終典藏版 Ver. 36.1 - Sinfo 順序回歸版】
-# 特點：保留多執行緒與Alpha合成，但移除所有座標排序(Top Sort)。
-# 圖片堆疊順序完全依照 Sinfo 列表的順序與預設的層級邏輯。
+# 【最終典藏完整還原版 Ver. 37.0 - Sinfo 條件與通配符完美實作版】
+# 特點：保留多執行緒與Alpha合成，完美還原吉里吉里 # (姿勢)、@ (服裝)、* (模糊匹配) 與 ! (取反) 邏輯。
+# 圖片堆疊順序完全依照 Sinfo 列表對照總表的先天層級逻辑 [::-1]。
 
 import pandas as pd
 from PIL import Image
@@ -18,15 +18,61 @@ import threading
 MAX_WORKERS = 8  # 執行緒數量
 
 # 【特殊圖層設定】
-# 這裡保留您原本 Purpure 腳本中的設定，以免改動太多
 SPECIAL_UNDERLAY_IDS = {8320, 8321} 
-PRIORITY_OVERLAY_PATHS = {'かぶせ 水着', '鬼面'} # 可在此加入需要強制置頂的名稱
+PRIORITY_OVERLAY_PATHS = {'かぶせ 水着', '鬼面'} 
 # ==============================================================================
 
 log_lock = threading.Lock()
 set_lock = threading.Lock()
 
-# --- 1. 資料讀取與預處理 ---
+# --- 1. 條件判定核心輔助函數 (還原 TJS2 foreMatch 邏輯) ---
+def matches_single_condition(current_val, cond_val):
+    """檢查單個條件是否符合，支援 ! 取反與 * 字首模糊匹配"""
+    is_negated = cond_val.startswith('!')
+    if is_negated: 
+        cond_val = cond_val[1:]
+    
+    if cond_val.endswith('*'):
+        prefix = cond_val[:-1]
+        match = current_val.startswith(prefix)
+    else:
+        match = (current_val == cond_val)
+        
+    return not match if is_negated else match
+
+def evaluate_face_condition(condition_str, dress_name, diff_id):
+    """解析並評估複合條件字串，例如 '#手胸@パジャマ１' 或 '#手*'"""
+    if not condition_str: 
+        return True
+        
+    pose_cond = None
+    dress_cond = None
+    
+    # 拆解 # (姿勢) 與 @ (服裝)
+    if '#' in condition_str and '@' in condition_str:
+        hash_idx = condition_str.index('#')
+        at_idx = condition_str.index('@')
+        if hash_idx < at_idx:
+            pose_cond = condition_str[hash_idx+1:at_idx].strip()
+            dress_cond = condition_str[at_idx+1:].strip()
+        else:
+            dress_cond = condition_str[at_idx+1:hash_idx].strip()
+            pose_cond = condition_str[hash_idx+1:].strip()
+    elif '#' in condition_str:
+        pose_cond = condition_str[condition_str.index('#')+1:].strip()
+    elif '@' in condition_str:
+        dress_cond = condition_str[condition_str.index('@')+1:].strip()
+        
+    # 驗證姿勢條件
+    if pose_cond and not matches_single_condition(diff_id, pose_cond): 
+        return False
+    # 驗證服裝條件
+    if dress_cond and not matches_single_condition(dress_name, dress_cond): 
+        return False
+        
+    return True
+
+# --- 2. 資料讀取與預處理 ---
 def load_layer_data_with_paths(filepath):
     print(f"[INFO] 正在解析 '{filepath}'...")
     parsed_data = []
@@ -91,7 +137,7 @@ def load_sinfo_data_manual(filepath):
         print(f"[錯誤] 手動解析 '{filepath}' 時發生問題: {e}")
         return []
 
-# --- 2. 影像合成核心 (Worker) ---
+# --- 3. 影像合成核心 (Worker) ---
 def create_composite_task(layers_to_draw, base_info, output_path, log_file, combination_context):
     if not layers_to_draw: return
     try:
@@ -105,6 +151,10 @@ def create_composite_task(layers_to_draw, base_info, output_path, log_file, comb
         max_y = min_y + first_part_info['height']
 
         for part_info in layers_to_draw[1:]:
+            # === 💡 程式夥伴優化：如果是空資料夾或錨點(寬高為0)，直接跳過，不影響畫布大小 ===
+            if part_info['width'] == 0 or part_info['height'] == 0:
+                continue
+            # ====================================================================
             dx, dy = part_info['left'] - base_x, part_info['top'] - base_y
             min_x, min_y = min(min_x, dx), min(min_y, dy)
             max_x, max_y = max(max_x, dx + part_info['width']), max(max_y, dy + part_info['height'])
@@ -140,7 +190,7 @@ def create_composite_task(layers_to_draw, base_info, output_path, log_file, comb
             print(f"  ❌ [錯誤] {os.path.basename(output_path)}: {e}")
             log_file.write(f"合成圖片錯誤: {e}\n")
 
-# --- 3. 邏輯控制 ---
+# --- 4. 邏輯控制 ---
 def process_character(txt_path, sinfo_path, log_file):
     char_base_name = os.path.basename(txt_path).replace('.txt', '')
     output_folder = 'output'
@@ -164,7 +214,7 @@ def process_character(txt_path, sinfo_path, log_file):
     
     # 規則解析
     face_rules = defaultdict(list)
-    conditional_faces = defaultdict(lambda: defaultdict(dict))
+    conditional_faces = defaultdict(list)  # 修改：改為單層 list 儲存 (condition_str, path)
     facegroup_order = [r['group_name'] for r in sinfo_rules if r['type'] == 'facegroup']
     fgname_rules = [r for r in sinfo_rules if r['type'] == 'fgname']
     fgalias_rules = [r for r in sinfo_rules if r['type'] == 'fgalias']
@@ -187,13 +237,20 @@ def process_character(txt_path, sinfo_path, log_file):
             for diff_id in dress_rules[dress_name]:
                 dress_rules[dress_name][diff_id].insert(0, base_path)
 
+    # --- 【核心修正 1】分離表情名稱與 ＃、＠ 條件 ---
     for rule in [r for r in sinfo_rules if r['type'] == 'face']:
-        if '@' in rule['name']:
-            face_name, condition = rule['name'].split('@', 1)
-            if condition not in conditional_faces[face_name]: conditional_faces[face_name][condition] = []
-            conditional_faces[face_name][condition].append(rule['path'])
+        raw_name = rule['name']
+        cond_idx = len(raw_name)
+        if '#' in raw_name: cond_idx = min(cond_idx, raw_name.index('#'))
+        if '@' in raw_name: cond_idx = min(cond_idx, raw_name.index('@'))
+        
+        face_name = raw_name[:cond_idx].strip()
+        condition_str = raw_name[cond_idx:].strip()
+        
+        if condition_str:
+            conditional_faces[face_name].append((condition_str, rule['path']))
         else:
-            face_rules[rule['name']].append(rule['path'])
+            face_rules[face_name].append(rule['path'])
 
     generated_face_rules = {}
     fgname_to_paths_map = defaultdict(list)
@@ -229,7 +286,6 @@ def process_character(txt_path, sinfo_path, log_file):
             for diff_id, dress_paths in diffs.items():
                 current_dress_key = f"{dress_name}_{diff_id}"
                 
-                # --- [還原舊版邏輯] 依照設定分離出優先圖層與普通圖層 ---
                 priority_overlay_ids, other_dress_ids = [], []
                 for p in dress_paths:
                     lid = path_to_id.get(p)
@@ -240,37 +296,41 @@ def process_character(txt_path, sinfo_path, log_file):
                 special_dress_parts = [lid for lid in other_dress_ids if lid in SPECIAL_UNDERLAY_IDS]
                 normal_dress_parts = [lid for lid in other_dress_ids if lid not in SPECIAL_UNDERLAY_IDS]
                 
-                # 建構 Dress 的基底與覆蓋層
                 base_layers_for_comp = normal_dress_parts[:1] + special_dress_parts + normal_dress_parts[:1] if special_dress_parts and normal_dress_parts else normal_dress_parts[:1]
                 overlay_layers_for_comp = normal_dress_parts[1:]
                 
-                submit_face_combinations(executor, futures, final_face_rules, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, id_to_path, layer_df, char_base_name, current_dress_key, generated_filenames_set, log_file, output_folder)
+                # 提交普通/組裝表情
+                submit_face_combinations(executor, futures, final_face_rules, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, layer_df, char_base_name, current_dress_key, generated_filenames_set, log_file, output_folder)
                 
-                for face_name, conditions in conditional_faces.items():
-                    if matches_condition(dress_name, condition):
-                        submit_face_combinations(executor, futures, {face_name: face_paths}, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, id_to_path, layer_df, char_base_name, f"{current_dress_key}@{condition}", generated_filenames_set, log_file, output_folder)
+                # --- 【核心修正 2】精確過濾並提交成立的條件表情 ---
+                current_active_conditional_faces = defaultdict(list)
+                for face_name, rules_list in conditional_faces.items():
+                    for condition_str, path in rules_list:
+                        if evaluate_face_condition(condition_str, dress_name, diff_id):
+                            current_active_conditional_faces[face_name].append(path)
+                
+                for face_name, face_paths in current_active_conditional_faces.items():
+                    submit_face_combinations(executor, futures, {face_name: face_paths}, base_layers_for_comp, priority_overlay_ids, overlay_layers_for_comp, path_to_id, layer_df, char_base_name, f"{current_dress_key}_cond", generated_filenames_set, log_file, output_folder)
         
         concurrent.futures.wait(futures)
     print(f"\n{'='*20} 角色: {char_base_name} 處理完成 {'='*20}")
 
-def matches_condition(dress_name, condition):
-    is_negated = condition.startswith('!')
-    if is_negated: condition = condition[1:]
-    match = dress_name.startswith(condition[:-1]) if condition.endswith('*') else (dress_name == condition)
-    return not match if is_negated else match
-
-# --- 核心排序與組合 (修正為列表拼接) ---
-def submit_face_combinations(executor, futures, face_rule_dict, base_layers, priority_overlays, final_overlays, path_to_id, id_to_path, layer_df, char_base_name, dress_info_str, generated_filenames_set, log_file, output_folder):
+# --- 核心排序與組合 ---
+def submit_face_combinations(executor, futures, face_rule_dict, base_layers, priority_overlays, final_overlays, path_to_id, layer_df, char_base_name, dress_info_str, generated_filenames_set, log_file, output_folder):
     
-    # 為了效能，先做一個 ID -> Info 的查找表
     dress_id_set = set(base_layers + priority_overlays + final_overlays)
     
-    # 收集所有需要的 ID
+    # 收集所有需要的 ID（包含支援 * 通配符的擴展）
     all_needed_ids_set = dress_id_set.copy()
     for face_paths in face_rule_dict.values():
          for p in face_paths:
-             lid = path_to_id.get(p)
-             if lid: all_needed_ids_set.add(lid)
+             if '*' in p:
+                 prefix = p.replace('*', '')
+                 for full_path, lid in path_to_id.items():
+                     if full_path.startswith(prefix): all_needed_ids_set.add(lid)
+             else:
+                 lid = path_to_id.get(p)
+                 if lid: all_needed_ids_set.add(lid)
 
     filtered_df = layer_df[layer_df['layer_id'].isin(all_needed_ids_set)].copy()
     layer_info_map = filtered_df.set_index('layer_id').to_dict('index')
@@ -280,37 +340,39 @@ def submit_face_combinations(executor, futures, face_rule_dict, base_layers, pri
         
         face_layers_ids = []
         all_paths_found = True
+        
+        # --- 【核心修正 3】支援路徑字首 * 模糊匹配的多圖層批量抓取 ---
         for p in face_paths:
-            lid = path_to_id.get(p)
-            if lid is None: all_paths_found = False
-            else: face_layers_ids.append(lid)
+            if '*' in p:
+                prefix = p.replace('*', '')
+                matched_lids = [lid for full_path, lid in path_to_id.items() if full_path.startswith(prefix)]
+                if matched_lids:
+                    face_layers_ids.extend(matched_lids)
+                else:
+                    all_paths_found = False
+            else:
+                lid = path_to_id.get(p)
+                if lid is None: all_paths_found = False
+                else: face_layers_ids.append(lid)
         
         if not all_paths_found: continue
 
-        # ==================== 【程式夥伴修正：對照總表並反轉為「底到面」】 ====================
-        # 1. 把這次拼裝出來的所有五官 ID 變成一個集合
+        # --- 【核心修正 4】對照總表先天層級順序，並加上 [::-1] 倒序（確保 ほほ 在底，眉 在面） ---
         face_id_set = set(face_layers_ids)
-        
-        # 2. 直接去對照總表 (layer_df) 裡的先天順序，並且加上 [::-1] 徹底倒過來（變成 ほほ -> 口 -> 目 -> 眉）
         sorted_face_layers_ids = [int(lid) for lid in layer_df['layer_id'].values if lid in face_id_set][::-1]
         
-        # 3. 依照正確的底面順序拼接
+        # 最終三明治拼接順序：身體(底) -> 依總表排好的五官 -> 置頂面具配件 -> 其餘服裝(面)
         ordered_ids = base_layers + sorted_face_layers_ids + priority_overlays + final_overlays
-        # ==============================================================================
         
         layers_to_draw = []
-        missing = False
         for lid in ordered_ids:
             if lid in layer_info_map:
-                info = layer_info_map[lid]
+                info = layer_info_map[lid].copy()
                 info['layer_id'] = lid
                 layers_to_draw.append(info)
-            else:
-                missing = True # 缺檔或 ID 錯誤
         
         if not layers_to_draw: continue
         
-        # 基準點通常取第一張 (最底層)
         base_info_for_coords = layers_to_draw[0]
 
         final_used_ids = [info['layer_id'] for info in layers_to_draw]
