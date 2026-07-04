@@ -1,13 +1,14 @@
 # ==============================================================================
-# 【終極大一統智慧全局 Z-Order 版 Ver. 47.0 - 官方表情條件覆蓋還原版】
+# 【大一統智慧全局 Z-Order 版 Ver. 49.0 - 官方隱藏機制全解鎖旗艦版】
 # ==============================================================================
-# 特點：
-# 1. 完美還原官方表情覆蓋機制：滿足特定姿勢條件(如 #手顔)時，特殊表情直接替換/覆蓋基礎表情，根治雙手沒放臉穿幫。
-# 2. 智慧缺圖控管策略（MISSING_IMG_POLICY）：支援 0(缺圖都合), 1(衣服缺不合), 2(不論衣服表情缺一不可)，消滅日誌雙標。
-# 3. 智慧型名稱後退降級搜索：完美修復「只有臉沒身體」問題，路徑不對時自動降級匹配純圖層名。
-# 4. 5重圖片格式智慧相容：自動碰撞 {ID}.png, {名稱}.png 及其前綴組合，確保素材 100% 載入。
-# 5. 100% 還原官方全局 Z-Order 渲染鐵律：所有啟用的圖層完全對照總表先天順序進行全局倒序 [::-1] 疊加。
-# 6. 6手交叉配對引擎：智慧相容 *.pbd.txt, *.pbd, *.txt 與 *.sinfo.txt, *.sinfo, *_info.txt。
+# 旗艦級重大更新：
+# 1. 修正 Dummy 阻斷 Bug：遇到路徑為 dummy 的五官槽位時自動放行，不再誤判為缺檔而跳過表情。
+# 2. 實作 FaceFolder 機制：完整解析 dress 規則第 6 欄，特定姿勢下自動重導向至專用五官路徑。
+# 3. 實作 Layout Diff_ID 聯動：完整解析總表第 14 欄，自動激活並渲染與基礎圖層綁定的隱藏聯動圖層。
+# 4. 100% 還原官方全局 Z-Order 鐵律：所有啟用圖層完全對照總表先天順序進行全局倒序 [::-1] 疊加。
+# 5. 智慧型名稱後退降級搜索：完美修復「只有臉沒身體」問題，路徑不對時自動降級匹配純圖層名。
+# 6. 5重圖片格式智慧相容：自動碰撞 {ID}.png, {名稱}.png 及其前綴組合，確保素材 100% 載入。
+# 7. 智慧缺圖控管策略（MISSING_IMG_POLICY）：支援 0(缺圖都合), 1(衣服缺不合), 2(缺一不可)。
 # ==============================================================================
 
 import pandas as pd
@@ -25,7 +26,7 @@ import re
 # ==============================================================================
 # --- 使用者設定區 ---
 MAX_WORKERS = 12  # 多執行緒線程數量
-PRIORITY_OVERLAY_PATHS = {'かぶせ 水着123', '鬼面123', 'かぶせ 水着123'} 
+PRIORITY_OVERLAY_PATHS = {'かぶせ 水着12', '鬼面123', 'かぶせ 水着123', '追加_麦わら帽子123'} 
 
 # 【缺圖控管策略設定位】
 # 0 = 缺圖都合（殘缺輸出）
@@ -54,7 +55,7 @@ def read_file_with_smart_encoding(filepath):
                     continue
                 if len(content) > 0:
                     has_tab = '\t' in content
-                    has_keyword = any(k in content for k in ['dress', 'face', 'layer_type', '#', 'bs_'])
+                    has_keyword = any(k in content for k in ['dress', 'face', 'layer_type', '#', 'bs_', 'fgname'])
                     if not (has_tab or has_keyword):
                         continue 
                         
@@ -115,6 +116,35 @@ def normalize_path_string(path_str):
     """將路徑底線化、移除任何空白，確保跨平台查找 100% 精確"""
     return path_str.replace('/', '_').replace(' ', '').replace(' ', '')
 
+def find_layer_id(p, path_to_id, layer_df):
+    """智慧型多層級路徑匹配器：支持精確對齊與局部後綴相容，完美杜絕『同名圖層』指鹿為馬"""
+    if not p or p.lower() == 'dummy': return None
+    
+    # 1. 第一優先：記憶體快取精確匹配
+    if p in path_to_id: return path_to_id[p]
+    norm_p = normalize_path_string(p)
+    if norm_p in path_to_id: return path_to_id[norm_p]
+    
+    # 2. 第二優先：針對局部描述，反向進行完整路徑後綴精確對齊
+    if '/' in p:
+        p_clean = p.strip('/')
+        norm_p_clean = normalize_path_string(p_clean)
+        
+        for _, row in layer_df.iterrows():
+            if row['full_path_slash'].endswith(p_clean):
+                return row['layer_id']
+        for _, row in layer_df.iterrows():
+            if row['full_path_underscore'].endswith(norm_p_clean):
+                return row['layer_id']
+                
+    # 3. 保底盲配：切出最後一節圖層名稱進行模糊匹配
+    last_part = p.split('/')[-1]
+    if last_part in path_to_id: return path_to_id[last_part]
+    norm_last = normalize_path_string(last_part)
+    if norm_last in path_to_id: return path_to_id[norm_last]
+    
+    return None
+
 def load_layer_data_with_paths(filepath):
     print(f"[INFO] 正在解析配置總表 '{filepath}'...")
     parsed_data = []
@@ -127,13 +157,19 @@ def load_layer_data_with_paths(filepath):
         reader = csv.reader(lines[2:], delimiter='\t')
         for row in reader:
             if len(row) >= 10 and row[9].strip().isdigit():
+                # 💡 核心優化：一路讀到第 14 欄，抓取官方隱藏的 diff_id 聯動圖層
+                diff_id_val = ""
+                if len(row) >= 14 and row[13].strip():
+                    diff_id_val = row[13].strip()
+                    
                 parsed_data.append({
                     'layer_id': int(row[9].strip()), 'name': row[1].strip(),
                     'left': int(row[2].strip()), 'top': int(row[3].strip()),
                     'width': int(row[4].strip()) if len(row) > 4 and row[4].strip().isdigit() else 0,
                     'height': int(row[5].strip()) if len(row) > 5 and row[5].strip().isdigit() else 0,
                     'opacity': int(row[7].strip()) if len(row) > 7 and row[7].strip().isdigit() else 255,
-                    'group_layer_id': int(row[10].strip()) if len(row) > 10 and row[10].strip().isdigit() else 0
+                    'group_layer_id': int(row[10].strip()) if len(row) > 10 and row[10].strip().isdigit() else 0,
+                    'diff_id': diff_id_val
                 })
         df = pd.DataFrame(parsed_data)
         
@@ -195,19 +231,27 @@ def create_composite_task(layers_to_draw, base_info, output_path, log_file, comb
     try:
         base_x, base_y = base_info['left'], base_info['top']
         
-        # 1. 探測所有實體檔案的完整性，並標記缺失歸屬
-        missing_dress = False
-        missing_face = False
-        loaded_layers = [] 
+        valid_parts = [p for p in layers_to_draw if p['width'] > 0 and p['height'] > 0]
+        if not valid_parts: return
         
-        for part_info in layers_to_draw:
+        first_part = valid_parts[0]
+        min_x, min_y = first_part['left'] - base_x, first_part['top'] - base_y
+        max_x, max_y = min_x + first_part['width'], min_y + first_part['height']
+
+        for part_info in valid_parts[1:]:
+            dx, dy = part_info['left'] - base_x, part_info['top'] - base_y
+            min_x, min_y = min(min_x, dx), min(min_y, dy)
+            max_x, max_y = max(max_x, dx + part_info['width']), max(max_y, dy + part_info['height'])
+        
+        canvas_width, canvas_height = max_x - min_x, max_y - min_y
+        master_canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
+
+        # 貼圖與多重格式智慧搜索
+        for part_info in valid_parts:
+            part_img = None
             lid = part_info['layer_id']
             lname = part_info.get('name', '')
             
-            if part_info['width'] == 0 or part_info['height'] == 0:
-                continue
-                
-            part_img = None
             possible_paths = []
             for folder in img_folders:
                 possible_paths.append(os.path.join(folder, f"{folder}_{lid}.png"))
@@ -223,41 +267,8 @@ def create_composite_task(layers_to_draw, base_info, output_path, log_file, comb
                     break
                     
             if part_img is None: 
-                if lid in dress_id_set: missing_dress = True
-                else: missing_face = True
-                
-                with log_lock:
-                    log_file.write(f"[圖層缺失] {combination_context}: 找不到圖層 ID {lid} ({lname}) 的實體圖片。\n")
-            else:
-                loaded_layers.append((part_info, part_img))
+                continue 
 
-        # 2. 智慧型控管攔截
-        if MISSING_IMG_POLICY == 1 and missing_dress:
-            with log_lock:
-                log_file.write(f"[原則跳過] {combination_context}: 衣服/身體圖層有缺，依控管策略(1)阻斷合成。\n")
-            return
-        elif MISSING_IMG_POLICY == 2 and (missing_dress or missing_face):
-            with log_lock:
-                log_file.write(f"[原則跳過] {combination_context}: 組合中存有缺件，依控管策略(2)阻斷合成。\n")
-            return
-
-        if not loaded_layers: return
-
-        # 3. 計算最精確畫布邊界
-        first_part = loaded_layers[0][0]
-        min_x, min_y = first_part['left'] - base_x, first_part['top'] - base_y
-        max_x, max_y = min_x + first_part['width'], min_y + first_part['height']
-
-        for part_info, _ in loaded_layers[1:]:
-            dx, dy = part_info['left'] - base_x, part_info['top'] - base_y
-            min_x, min_y = min(min_x, dx), min(min_y, dy)
-            max_x, max_y = max(max_x, dx + part_info['width']), max(max_y, dy + part_info['height'])
-        
-        canvas_width, canvas_height = max_x - min_x, max_y - min_y
-        master_canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
-
-        # 4. 進行實際的透明度堆疊貼圖
-        for part_info, part_img in loaded_layers:
             part_opacity = part_info.get('opacity', 255)
             if part_opacity < 255:
                 alpha = part_img.getchannel('A').point(lambda p: p * (part_opacity / 255.0))
@@ -305,11 +316,15 @@ def process_character(pbd_txt_path, sinfo_path, log_file):
         generated_filenames_set.update(os.path.basename(f) for f in existing_files)
 
     path_to_id = {}
+    layer_diff_map = {} # 儲存總表中的聯動 diff_id 映射
     for _, r in layer_df.iterrows():
         path_to_id[r['full_path_slash']] = r['layer_id']
         path_to_id[r['full_path_underscore']] = r['layer_id']
         path_to_id[normalize_path_string(r['full_path_slash'])] = r['layer_id']
+        path_to_id[r['name']] = r['layer_id']
         path_to_id[normalize_path_string(r['name'])] = r['layer_id']
+        if r['diff_id']:
+            layer_diff_map[r['layer_id']] = int(r['diff_id'])
 
     img_folders = [pbd_base_name, stripped_base_name]
 
@@ -320,19 +335,42 @@ def process_character(pbd_txt_path, sinfo_path, log_file):
     fgalias_rules = [r for r in sinfo_rules if r['type'] == 'fgalias']
     
     all_dress_rules_raw = [r['data'] for r in sinfo_rules if r['type'] == 'dress']
+    
     dress_rules = defaultdict(lambda: defaultdict(list))
-    dress_bases = {}
+    dress_bases = defaultdict(list)
+    # 💡 核心還原：建立姿勢與 facefolder 的映射字典
+    face_folders = defaultdict(dict) 
 
     for row in all_dress_rules_raw:
-        if len(row) >= 4 and row[2].strip() == 'base': dress_bases[row[1].strip()] = row[3].strip()
+        dress_name = row[1].strip()
+        kind = row[2].strip()
+        if kind == 'base' and len(row) >= 4:
+            base_path = row[3].strip()
+            if base_path and base_path.lower() != 'dummy':
+                if base_path not in dress_bases[dress_name]:
+                    dress_bases[dress_name].append(base_path)
+                    
     for row in all_dress_rules_raw:
         dress_name = row[1].strip()
-        diff_id = row[3].strip() if len(row) >= 5 else "unknown"
-        diff_path = row[4].strip() if len(row) >= 5 else ""
-        if diff_path: dress_rules[dress_name][diff_id].append(diff_path)
-    for dress_name, base_path in dress_bases.items():
+        kind = row[2].strip()
+        if kind == 'diff' and len(row) >= 5:
+            diff_id = row[3].strip()
+            diff_path = row[4].strip()
+            if diff_path and diff_path.lower() != 'dummy':
+                if diff_path not in dress_rules[dress_name][diff_id]:
+                    dress_rules[dress_name][diff_id].append(diff_path)
+            # 💡 核心還原：讀取服裝規則第 6 欄的 facefolder 定義
+            if len(row) >= 6 and row[5].strip():
+                ff_path = row[5].strip()
+                if ff_path.lower() != 'dummy':
+                    face_folders[dress_name][diff_id] = ff_path
+                    
+    for dress_name, base_paths in dress_bases.items():
         if dress_name in dress_rules:
-            for diff_id in dress_rules[dress_name]: dress_rules[dress_name][diff_id].insert(0, base_path)
+            for diff_id in dress_rules[dress_name]:
+                dress_rules[dress_name][diff_id] = base_paths + dress_rules[dress_name][diff_id]
+        else:
+            dress_rules[dress_name]["通常"] = list(base_paths)
 
     for rule in [r for r in sinfo_rules if r['type'] == 'face']:
         raw_name = rule['name']
@@ -365,7 +403,9 @@ def process_character(pbd_txt_path, sinfo_path, log_file):
                 combo_name = "_".join(c[0] for c in combo)
                 generated_face_rules[combo_name] = [p for c in combo for p in c[1] if p]
 
-    final_face_rules = generated_face_rules if generated_face_rules else face_rules
+    final_face_rules = defaultdict(list)
+    for k, v in face_rules.items(): final_face_rules[k].extend(v)
+    for k, v in generated_face_rules.items(): final_face_rules[k].extend(v)
     if not final_face_rules: return
 
     print(f"[INFO] 啟動平行執行緒處理，最大 Worker 數: {MAX_WORKERS}...")
@@ -378,60 +418,62 @@ def process_character(pbd_txt_path, sinfo_path, log_file):
                 
                 dress_layers_ids = []
                 for p in dress_paths:
-                    lid = path_to_id.get(p) or path_to_id.get(normalize_path_string(p))
-                    
+                    lid = find_layer_id(p, path_to_id, layer_df)
                     if lid is None and '/' in p:
                         last_part = p.split('/')[-1]
-                        lid = path_to_id.get(last_part) or path_to_id.get(normalize_path_string(last_part))
+                        lid = find_layer_id(last_part, path_to_id, layer_df)
                         
                     if lid is not None:
                         dress_layers_ids.append(lid)
                     else:
                         with log_lock:
-                            log_file.write(f"[服裝路徑未匹配] 配置 '{current_dress_key}': 部件 '{p}' 在總表中找不到，跳過該圖層。\n")
+                            log_file.write(f"[服裝路徑未匹配] 配置 '{current_dress_key}': 部件 '{p}' 在總表中找不到。\n")
                 
                 if not dress_layers_ids:
-                    log_file.write(f"[服裝定義失敗] '{current_dress_key}' 的所有衣服部件在總表中都找不到，已跳過該組合。\n")
                     continue
                 
-                # 💡 核心演進：為當前服裝/姿勢，動態計算最終採用的表情規則（完美還原官方覆蓋邏輯）
                 active_face_rules = {}
                 for f_name, f_paths in final_face_rules.items():
                     active_face_rules[f_name] = list(f_paths)
                     
-                # 檢查是否有成立的條件限定表情，若有，直接「覆蓋(Override)」基礎規則
                 for f_name, rules_list in conditional_faces.items():
                     for condition_str, path in rules_list:
                         if evaluate_face_condition(condition_str, dress_name, diff_id):
-                            # 特定姿勢下，該表情完全由特殊圖層取代
                             active_face_rules[f_name] = [path]
                             break 
                 
-                # 提交經過精確條件覆蓋後的最終表情群組
-                submit_face_combinations(executor, futures, active_face_rules, dress_layers_ids, path_to_id, layer_df, pbd_base_name, current_dress_key, generated_filenames_set, log_file, output_folder, img_folders)
+                # 💡 核心還原：提取當前服裝姿勢是否存在 facefolder 專用目錄
+                current_ff = face_folders[dress_name].get(diff_id, None)
+                
+                submit_face_combinations(executor, futures, active_face_rules, dress_layers_ids, path_to_id, layer_df, pbd_base_name, current_dress_key, generated_filenames_set, log_file, output_folder, img_folders, current_ff, layer_diff_map)
         
         concurrent.futures.wait(futures)
     print(f"『{pbd_base_name}』全局 Z-Order 智慧版合成工作順利完工！")
 
 # --- 6. 核心排序與組合發送引擎 ---
-def submit_face_combinations(executor, futures, face_rule_dict, dress_layers_ids, path_to_id, layer_df, pbd_base_name, dress_info_str, generated_filenames_set, log_file, output_folder, img_folders):
+def submit_face_combinations(executor, futures, face_rule_dict, dress_layers_ids, path_to_id, layer_df, pbd_base_name, dress_info_str, generated_filenames_set, log_file, output_folder, img_folders, face_folder, layer_diff_map):
     
+    dress_id_set = set(dress_layers_ids)
     all_needed_ids_set = set(dress_layers_ids)
+    
     for face_paths in face_rule_dict.values():
          for p in face_paths:
+             if p.lower() == 'dummy': continue # 💡 完美修正：dummy 圖層跳過不計入查找，防範阻斷
              if '*' in p:
                  prefix_slash = p.replace('*', '')
+                 if face_folder: prefix_slash = f"{face_folder}/{prefix_slash}"
                  prefix_underscore = normalize_path_string(prefix_slash)
                  for full_path, lid in path_to_id.items():
                      if full_path.startswith(prefix_slash) or full_path.startswith(prefix_underscore):
                          all_needed_ids_set.add(lid)
              else:
-                 lid = path_to_id.get(p) or path_to_id.get(normalize_path_string(p))
-                 if lid is None and '/' in p:
-                     last_part = p.split('/')[-1]
-                     lid = path_to_id.get(last_part) or path_to_id.get(normalize_path_string(last_part))
-                 if lid: 
-                     all_needed_ids_set.add(lid)
+                 # 💡 完美還原：若存在 face_folder，優先拼接查找
+                 lid = None
+                 if face_folder:
+                     lid = find_layer_id(f"{face_folder}/{p}", path_to_id, layer_df)
+                 if lid is None:
+                     lid = find_layer_id(p, path_to_id, layer_df)
+                 if lid: all_needed_ids_set.add(lid)
 
     filtered_df = layer_df[layer_df['layer_id'].isin(all_needed_ids_set)].copy()
     layer_info_map = filtered_df.set_index('layer_id').to_dict('index')
@@ -442,18 +484,22 @@ def submit_face_combinations(executor, futures, face_rule_dict, dress_layers_ids
         all_paths_found = True
         
         for p in face_paths:
+            if p.lower() == 'dummy': continue # 💡 完美修正：遇到 dummy 放行不報錯
             if '*' in p:
                 prefix_slash = p.replace('*', '')
+                if face_folder: prefix_slash = f"{face_folder}/{prefix_slash}"
                 prefix_underscore = normalize_path_string(prefix_slash)
                 matched_lids = [lid for full_path, lid in path_to_id.items() if full_path.startswith(prefix_slash) or full_path.startswith(prefix_underscore)]
                 if matched_lids: face_layers_ids.extend(matched_lids)
                 else: all_paths_found = False
             else:
-                lid = path_to_id.get(p) or path_to_id.get(normalize_path_string(p))
-                if lid is None and '/' in p:
-                    last_part = p.split('/')[-1]
-                    lid = path_to_id.get(last_part) or path_to_id.get(normalize_path_string(last_part))
-                
+                # 💡 完美還原：FaceFolder 優先路徑探測機制
+                lid = None
+                if face_folder:
+                    lid = find_layer_id(f"{face_folder}/{p}", path_to_id, layer_df)
+                if lid is None:
+                    lid = find_layer_id(p, path_to_id, layer_df)
+                    
                 if lid is None: all_paths_found = False
                 else: face_layers_ids.append(lid)
         
@@ -461,18 +507,51 @@ def submit_face_combinations(executor, futures, face_rule_dict, dress_layers_ids
 
         # ==================== 【100% 還原官方全局 Z-Order 倒序】 ====================
         current_active_set = set(dress_layers_ids + face_layers_ids)
+        
+        # 💡 核心還原：大總表 diff_id 聯動機制
+        additional_linked_ids = set()
+        for active_id in current_active_set:
+            if active_id in layer_diff_map:
+                additional_linked_ids.add(layer_diff_map[active_id])
+        current_active_set.update(additional_linked_ids)
+        
+        # 進行總表先天順序提取與反轉渲染
         ordered_ids = [int(lid) for lid in layer_df['layer_id'].values if lid in current_active_set][::-1]
         # ====================================================================================
         
         layers_to_draw = []
+        missing_dress = False
+        missing_face = False
+        
         for lid in ordered_ids:
             if lid in layer_info_map:
                 info = layer_info_map[lid].copy()
                 info['layer_id'] = lid
                 layers_to_draw.append(info)
-        
+                
+                lname = info.get('name', '')
+                if info['width'] == 0 or info['height'] == 0: continue
+                
+                part_img_found = False
+                for folder in img_folders:
+                    if os.path.exists(os.path.join(folder, f"{folder}_{lid}.png")) or os.path.exists(os.path.join(folder, f"{lid}.png")) or (lname and (os.path.exists(os.path.join(folder, f"{folder}_{lname}.png")) or os.path.exists(os.path.join(folder, f"{lname}.png")))):
+                        part_img_found = True
+                        break
+                if not part_img_found:
+                    if lid in dress_id_set: missing_dress = True
+                    else: missing_face = True
+                    with log_lock:
+                        log_file.write(f"[圖層缺失] {combination_context}: 找不到圖層 ID {lid} ({lname}) 的實體圖片。\n")
+
         if not layers_to_draw: continue
         
+        if MISSING_IMG_POLICY == 1 and missing_dress:
+            with log_lock: log_file.write(f"[原則跳過] {combination_context}: 衣服/身體圖層有缺，依控管策略(1)阻斷合成。\n")
+            continue
+        elif MISSING_IMG_POLICY == 2 and (missing_dress or missing_face):
+            with log_lock: log_file.write(f"[原則跳過] {combination_context}: 組合中存有缺件，依控管策略(2)阻斷合成。\n")
+            continue
+
         valid_draw_parts = [p for p in layers_to_draw if p['width'] > 0 and p['height'] > 0]
         if not valid_draw_parts: continue
         base_info_for_coords = valid_draw_parts[0]
@@ -493,7 +572,6 @@ def submit_face_combinations(executor, futures, face_rule_dict, dress_layers_ids
         if not os.path.exists(char_output_folder): os.makedirs(char_output_folder)
         output_path = os.path.join(char_output_folder, output_filename)
         
-        dress_id_set = set(dress_layers_ids)
         futures.append(executor.submit(create_composite_task, layers_to_draw, base_info_for_coords, output_path, log_file, combination_context, img_folders, dress_id_set))
 
 # --- 7. 程式主入口 ---
