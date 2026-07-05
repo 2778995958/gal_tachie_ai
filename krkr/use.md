@@ -1,4 +1,4 @@
-感覺開一帖比較好
+```260705 使用最新krkr立繪_多工.py，支援dress/face_帶base/diff_帶臉組合結構fgname,fgalias```
 
 首先，立繪目前只能裡站可看
 
@@ -104,16 +104,16 @@ images/
 ├── 月望b.txt
 └── 月望b.sinfo.txt
 ├── 檔名角色分資料夾.py
-└── yuzu立繪.py
+└── krkr立繪_多工.py
 ```
 
-運行*yuzu立繪.py*合拼
+運行*krkr立繪_多工.py*合拼
 
 這個只能合柚子，其他krkr理論上也有各種解說，主要是看懂sinfo結構
 
 理論上sinfo不會寫2種臉紅，例如只有弱臉紅，有需要則要自己改強臉紅
 
-有編碼問題請在yuzu立繪.py裡改裡面的encoding，有2個對應sinfo,pbd，不懂就問ai，或者改txt那邊
+有編碼問題請在krkr立繪_多工.py裡改裡面的encoding，有2個對應sinfo,pbd，不懂就問ai，或者改txt那邊
 
 柚子只有dress和face相對簡單
 
